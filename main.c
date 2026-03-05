@@ -13,6 +13,37 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
+struct frame_header_layout {
+    uint8_t final_frame : 2;
+    uint8_t reserved : 2;
+    uint8_t opcode : 4;
+    uint8_t mask : 4;
+    uint8_t payload_len_start : 7;
+    union {
+        uint16_t payload_length_extend16 : 16;
+        uint64_t payload_length_extend64 : 64;
+    } payload_length_extended;
+};
+
+enum frame_opcode
+{
+    FRAME_OPCODE_CONTINUATION = 0x0,
+    FRAME_OPCODE_TEXT  = 0x1,
+    FRAME_OPCODE_BINARY =  0x2,
+    FRAME_OPCODE_CLOSE  = 0x8,
+    FRAME_OPCODE_PING  = 0x9,
+    FRAME_OPCODE_PONG  = 0xA
+};
+
+struct frame {
+    bool final;
+    enum frame_opcode opcode;
+    uint8_t mask;
+    size_t payload_length;
+    uint32_t masking_key;
+    uint8_t *payload;
+};
+
 // LLM generated
 void websocket_accept(const char *client_key, char *out)
 {
@@ -31,10 +62,10 @@ void stop_signal(int) { running = false;
     signal(SIGINT, SIG_DFL);
 }
 
-void print_bytes(char *bytes, size_t len) {
+void print_bytes(unsigned char *bytes, size_t len) {
     for (size_t i = 0; i < len; i++) {
         printf("%x ", bytes[i]);
-        if (i % 16 == 0)
+        if ((i+1) % 16 == 0)
             fputc('\n', stdout);
     }
     fputc('\n', stdout);
@@ -47,7 +78,7 @@ int main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8080),
+        .sin_port = htons(8081),
         .sin_addr = { .s_addr = INADDR_ANY },
     };
     int ret = bind(sockfd, (struct sockaddr*)&addr, sizeof addr);
@@ -91,7 +122,7 @@ int main()
         assert(ret != -1);
 
         while (running) {
-            char buffer[4096 + 1];
+            unsigned char buffer[4096 + 1];
             int nbytes = recv(client_fd, buffer, 4096, 0);
             if (nbytes == 0) {
                 printf("Peer closed connection");
@@ -102,15 +133,12 @@ int main()
             printf("Received %d bytes:\n", nbytes);
             print_bytes(buffer, nbytes);
 
-            return 0;
-            // char response[] =
-            //     "HTTP/1.1 101 Switching Protocols\r\n"
-            //     "Upgrade: websocket\r\n"
-            //     "Connection: Upgrade\r\n"
-            //     "Sec-WebSocket-Accept\r\n\r\n";
-            // ret = send(client_fd, response, strlen(response), 0);
-            // printf("sent response back\n");
-            // assert(ret != -1);
+            struct frame_header_layout *layout = (void*)buffer;
+            printf("layout.final_frame : %d\n",          layout->final_frame);
+            printf("layout.reserved : %d\n",             layout->reserved);
+            printf("layout.opcode : %d\n",               layout->opcode);
+            printf("layout.mask : %d\n",                 layout->mask);
+            printf("layout.payload_len_start : %d\n",    layout->payload_len_start);
         }
     }
 
