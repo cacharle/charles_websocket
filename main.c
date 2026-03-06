@@ -13,38 +13,7 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
-struct frame_header_layout {
-    // First byte in network order (logical protocol order is final->reserverd->opcode)
-    uint8_t opcode : 4;
-    uint8_t reserved : 3;
-    uint8_t final_frame : 1;
-    // Second byte in network order (logical protocol order is mask->payload_length_start)
-    uint8_t payload_length_start : 7;
-    uint8_t mask : 1;
-    union {
-        uint16_t payload_length_extend16 : 16;
-        uint64_t payload_length_extend64 : 64;
-    } payload_length_extended;
-};
-
-enum frame_opcode
-{
-    FRAME_OPCODE_CONTINUATION = 0x0,
-    FRAME_OPCODE_TEXT  = 0x1,
-    FRAME_OPCODE_BINARY =  0x2,
-    FRAME_OPCODE_CLOSE  = 0x8,
-    FRAME_OPCODE_PING  = 0x9,
-    FRAME_OPCODE_PONG  = 0xA
-};
-
-struct frame {
-    bool final;
-    enum frame_opcode opcode;
-    uint8_t mask;
-    size_t payload_length;
-    uint32_t masking_key;
-    uint8_t *payload;
-};
+#include "frame.h"
 
 // LLM generated
 void websocket_accept(const char *client_key, char *out)
@@ -80,7 +49,7 @@ int main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8081),
+        .sin_port = htons(8080),
         .sin_addr = { .s_addr = INADDR_ANY },
     };
     int ret = bind(sockfd, (struct sockaddr*)&addr, sizeof addr);
@@ -134,14 +103,11 @@ int main()
             buffer[nbytes] = '\0';
             printf("Received %d bytes:\n", nbytes);
             print_bytes(buffer, nbytes);
-
-            struct frame_header_layout *layout = (void*)buffer;
-            printf("layout.final_frame : %d\n",          layout->final_frame);
-            printf("layout.reserved : %d\n",             layout->reserved);
-            printf("layout.opcode : %d\n",               layout->opcode);
-            printf("layout.mask : %d\n",                 layout->mask);
-            printf("layout.payload_len_start : %d\n",    layout->payload_length_start);
+            frame_t f;
+            frame_parse(&f, buffer, sizeof buffer);
+            frame_print(&f);
         }
+        close(client_fd);
     }
 
     close(sockfd);
