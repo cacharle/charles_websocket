@@ -14,11 +14,13 @@
 #include <openssl/evp.h>
 
 struct frame_header_layout {
-    uint8_t final_frame : 2;
-    uint8_t reserved : 2;
+    // First byte in network order (logical protocol order is final->reserverd->opcode)
     uint8_t opcode : 4;
-    uint8_t mask : 4;
-    uint8_t payload_len_start : 7;
+    uint8_t reserved : 3;
+    uint8_t final_frame : 1;
+    // Second byte in network order (logical protocol order is mask->payload_length_start)
+    uint8_t payload_length_start : 7;
+    uint8_t mask : 1;
     union {
         uint16_t payload_length_extend16 : 16;
         uint64_t payload_length_extend64 : 64;
@@ -138,7 +140,7 @@ int main()
             printf("layout.reserved : %d\n",             layout->reserved);
             printf("layout.opcode : %d\n",               layout->opcode);
             printf("layout.mask : %d\n",                 layout->mask);
-            printf("layout.payload_len_start : %d\n",    layout->payload_len_start);
+            printf("layout.payload_len_start : %d\n",    layout->payload_length_start);
         }
     }
 
