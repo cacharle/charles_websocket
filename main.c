@@ -9,24 +9,8 @@
 #include <string.h>
 #include <ctype.h>
 
-#include <openssl/sha.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-
+#include "handshake.h"
 #include "frame.h"
-
-// LLM generated
-void websocket_accept(const char *client_key, char *out)
-{
-    const char *guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-
-    char combined[256];
-    unsigned char sha1[SHA_DIGEST_LENGTH];
-    snprintf(combined, sizeof(combined), "%s%s", client_key, guid);
-    SHA1((unsigned char*)combined, strlen(combined), sha1);
-    int len = EVP_EncodeBlock((unsigned char*)out, sha1, SHA_DIGEST_LENGTH);
-    out[len] = '\0';
-}
 
 static bool running = true;
 void stop_signal(int) { running = false;
@@ -49,7 +33,7 @@ int main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8082),
+        .sin_port = htons(8080),
         .sin_addr = { .s_addr = INADDR_ANY },
     };
     int ret = bind(sockfd, (struct sockaddr*)&addr, sizeof addr);
@@ -62,34 +46,14 @@ int main()
         socklen_t client_addr_len = sizeof client_addr;
         int client_fd = accept(sockfd, (struct sockaddr*)&client_addr, &client_addr_len);
 
-        char buffer[4096 + 1];
-        int nbytes = recv(client_fd, buffer, 4096, 0);
+        char request[4096 + 1];
+        int nbytes = recv(client_fd, request, 4096, 0);
         assert(nbytes != -1);
-        buffer[nbytes] = '\0';
-        printf("Received initial: %s\n", buffer);
-
-        char *result = strstr(buffer, "Sec-WebSocket-Key:");
-        assert(result != NULL);
-        result += strlen("Sec-WebSocket-Key:");
-        while (isspace(*result))
-            result++;
-        char *newline = strchr(result, '\r');
-        *newline = '\0';
-        printf("\n\nHere result: '%s'\n", result);
-        char accept_key[512];
-        websocket_accept(result, accept_key);
-
-        char format[] =
-            "HTTP/1.1 101 Switching Protocols\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Accept: %s\r\n\r\n";
+        request[nbytes] = '\0';
         char response[1024];
-        sprintf(response, format, accept_key);
-        printf("Sending: %s\n", response);
+        parse_request_and_generate_response(request, response);
 
         ret = send(client_fd, response, strlen(response), 0);
-        printf("sent initial response back\n");
         assert(ret != -1);
 
         while (running) {
