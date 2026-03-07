@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include "frame.h"
 
@@ -24,11 +25,11 @@ void frame_parse(frame_t* frame, const void *bytes, size_t size)
         frame->payload_length = layout->payload_length_start;
     }
     else if (layout->payload_length_start == 126) {
-        frame->payload_length = *(uint16_t*)bytes_rest;
+        frame->payload_length = ntohs(*(uint16_t*)bytes_rest);
         bytes_rest += sizeof(uint16_t);
     }
     else if (layout->payload_length_start == 127) {
-        frame->payload_length = *(uint64_t*)bytes_rest;
+        frame->payload_length = be64toh(*(uint64_t*)bytes_rest);
         bytes_rest += sizeof(uint64_t);
     }
     uint32_t masking_key = 0;

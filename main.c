@@ -49,7 +49,7 @@ int main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8080),
+        .sin_port = htons(8082),
         .sin_addr = { .s_addr = INADDR_ANY },
     };
     int ret = bind(sockfd, (struct sockaddr*)&addr, sizeof addr);

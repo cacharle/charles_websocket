@@ -20,10 +20,10 @@ async def dump_client(uri):
                 if msg.lower() == "exit":
                     await websocket.close()
                     break
-                await websocket.send(msg)
+                await websocket.send(msg * 100)
 
         await asyncio.gather(receive(), send())
 
 if __name__ == "__main__":
-    uri = "ws://localhost:8080"
+    uri = "ws://localhost:8082"
     asyncio.run(dump_client(uri))
