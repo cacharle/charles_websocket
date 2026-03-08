@@ -22,10 +22,16 @@ typedef struct  {
     union {
         char *text;
         uint8_t *binary;
+        struct {
+            uint16_t status_code;
+            uint8_t *reason;
+        } close;
     } payload;
 } frame_t;
 
-void frame_parse(frame_t* dest, const void *bytes, size_t size);
+void frame_dump(frame_t* frame, uint8_t *dest, size_t *dest_size);
+bool frame_parse(frame_t* dest, void *bytes, size_t size);
 void frame_print(const frame_t *frame);
+void frame_destroy(frame_t *frame);
 
 #endif // CHARLES_WEBSOCKET_FRAME_H

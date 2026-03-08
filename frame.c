@@ -1,44 +1,135 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <arpa/inet.h>
-
 #include "frame.h"
+#include <arpa/inet.h>
+#include <assert.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-struct frame_header_layout {
-    // First byte in network order (logical protocol order is final->reserverd->opcode)
-    uint8_t opcode : 4;
-    uint8_t reserved : 3;
+struct frame_header_layout
+{
+    // First byte in network order (logical protocol order is
+    // final->reserverd->opcode)
+    uint8_t opcode      : 4;
+    uint8_t reserved    : 3;
     uint8_t final_frame : 1;
-    // Second byte in network order (logical protocol order is mask->payload_length_start)
+    // Second byte in network order (logical protocol order is
+    // mask->payload_length_start)
     uint8_t payload_length_start : 7;
-    uint8_t mask : 1;
+    uint8_t mask                 : 1;
 };
 
-void frame_parse(frame_t* frame, const void *bytes, size_t size)
+void
+frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
 {
-    const struct frame_header_layout *layout = bytes;
-    frame->final = layout->final_frame;
-    frame->opcode = layout->opcode;
-    const void *bytes_rest = bytes + sizeof(struct frame_header_layout);
-    if (layout->payload_length_start < 126) {
-        frame->payload_length = layout->payload_length_start;
-    }
-    else if (layout->payload_length_start == 126) {
-        frame->payload_length = ntohs(*(uint16_t*)bytes_rest);
+    struct frame_header_layout *layout = (void *)dest;
+    layout->final_frame = frame->final;
+    layout->reserved = 0;
+    layout->opcode = frame->opcode;
+    layout->mask = 0;
+    void *bytes_rest = (void *)dest + sizeof(struct frame_header_layout);
+    if (frame->payload_length < 126)
+        layout->payload_length_start = frame->payload_length;
+    else if (frame->payload_length <= USHRT_MAX)
+    {
+        layout->payload_length_start = 126;
+        *(uint16_t *)bytes_rest = htons(frame->payload_length);
         bytes_rest += sizeof(uint16_t);
     }
-    else if (layout->payload_length_start == 127) {
-        frame->payload_length = be64toh(*(uint64_t*)bytes_rest);
+    else
+    {
+        layout->payload_length_start = 127;
+        *(uint64_t *)bytes_rest = htobe64(frame->payload_length);
         bytes_rest += sizeof(uint64_t);
     }
-    uint32_t masking_key = 0;
-    if (layout->mask) {
-        masking_key = *(uint32_t*)bytes_rest;
-        bytes_rest += sizeof(uint32_t);
-    }
-    switch (frame->opcode) {
+    switch (frame->opcode)
+    {
     case FRAME_OPCODE_BINARY:
+    case FRAME_OPCODE_PING:
+    case FRAME_OPCODE_PONG:
+        if (frame->payload.binary != NULL)
+            memcpy(bytes_rest, frame->payload.binary, frame->payload_length);
+        break;
+    case FRAME_OPCODE_TEXT:
+        if (frame->payload.text != NULL)
+            memcpy(bytes_rest, frame->payload.text, frame->payload_length);
+        break;
+    case FRAME_OPCODE_CLOSE:
+        *(uint16_t *)bytes_rest = htons(frame->payload.close.status_code);
+        bytes_rest += sizeof(uint16_t);
+        if (frame->payload_length > 2 && frame->payload.close.reason != NULL)
+            memcpy(
+                bytes_rest, frame->payload.close.reason, frame->payload_length - 2);
+        bytes_rest -= sizeof(uint16_t);  // HACK: for dest_size after
+        break;
+    default:
+        break;
+    }
+    size_t header_size = bytes_rest - (void *)layout;
+    *dest_size = header_size + frame->payload_length;
+}
+
+bool
+frame_parse(frame_t *frame, void *bytes, size_t size)
+{
+    size_t current_size = 0;
+    current_size += sizeof(struct frame_header_layout);
+    if (size < current_size)
+        return false;
+    struct frame_header_layout *layout = bytes;
+    frame->final = layout->final_frame;
+    frame->opcode = layout->opcode;
+    void *bytes_rest = bytes + sizeof(struct frame_header_layout);
+
+    if (frame->opcode != FRAME_OPCODE_CONTINUATION &&
+        frame->opcode != FRAME_OPCODE_TEXT && frame->opcode != FRAME_OPCODE_BINARY &&
+        frame->opcode != FRAME_OPCODE_CLOSE && frame->opcode != FRAME_OPCODE_PING &&
+        frame->opcode != FRAME_OPCODE_PONG)
+        return false;
+
+    if ((frame->opcode == FRAME_OPCODE_CLOSE || frame->opcode == FRAME_OPCODE_PING ||
+         frame->opcode == FRAME_OPCODE_PONG) &&
+        layout->payload_length_start > 125)
+        return false;
+
+    if (layout->payload_length_start < 126)
+    {
+        frame->payload_length = layout->payload_length_start;
+    }
+    else if (layout->payload_length_start == 126)
+    {
+        current_size += sizeof(uint16_t);
+        if (size < current_size)
+            return false;
+        frame->payload_length = ntohs(*(uint16_t *)bytes_rest);
+        bytes_rest += sizeof(uint16_t);
+    }
+    else if (layout->payload_length_start == 127)
+    {
+        current_size += sizeof(uint64_t);
+        if (size < current_size)
+            return false;
+        frame->payload_length = be64toh(*(uint64_t *)bytes_rest);
+        bytes_rest += sizeof(uint64_t);
+    }
+    if (layout->mask)
+    {
+        current_size += sizeof(uint32_t);
+        if (size < current_size)
+            return false;
+        uint32_t masking_key = *(uint32_t *)bytes_rest;
+        bytes_rest += sizeof(uint32_t);
+        uint8_t *tmp = bytes_rest;
+        if (size < current_size + frame->payload_length)
+            return false;
+        for (size_t i = 0; i < frame->payload_length; i++)
+            tmp[i] = tmp[i] ^ ((uint8_t *)&masking_key)[i % 4];
+    }
+    switch (frame->opcode)
+    {
+    case FRAME_OPCODE_BINARY:
+    case FRAME_OPCODE_PING:
+    case FRAME_OPCODE_PONG:
         frame->payload.binary = malloc(frame->payload_length);
         memcpy(frame->payload.binary, bytes_rest, frame->payload_length);
         break;
@@ -47,43 +138,103 @@ void frame_parse(frame_t* frame, const void *bytes, size_t size)
         memcpy(frame->payload.text, bytes_rest, frame->payload_length);
         frame->payload.text[frame->payload_length] = '\0';
         break;
+    case FRAME_OPCODE_CLOSE:
+        frame->payload.close.status_code = 0;
+        frame->payload.close.reason = NULL;
+        if (frame->payload_length >= 2)
+        {
+            frame->payload.close.status_code = ntohs(*(uint16_t *)bytes_rest);
+            bytes_rest += sizeof(uint16_t);
+            if (frame->payload_length > 2)
+            {
+                frame->payload.close.reason = malloc(frame->payload_length - 2);
+                memcpy(frame->payload.close.reason,
+                       bytes_rest,
+                       frame->payload_length - 2);
+            }
+        }
+        break;
     default:
         break;
     }
-    if (layout->mask) {
-        for (size_t i = 0; i < frame->payload_length; i++)
-            frame->payload.binary[i] = frame->payload.binary[i] ^ ((uint8_t*)&masking_key)[i % 4];
-    }
+    return true;
 }
+
+char *opcode_close_status_string[] = {
+    [1000] = "Normal closure",
+    [1001] = "Going away",
+    [1002] = "Protocol error",
+    [1003] = "Unsupported data",
+    [1008] = "Policy violation",
+    [1011] = "Internal error",
+};
 
 char *opcode_to_string[] = {
     [FRAME_OPCODE_CONTINUATION] = "continuation",
-    [FRAME_OPCODE_TEXT]  = "text",
-    [FRAME_OPCODE_BINARY] =  "binary",
-    [FRAME_OPCODE_CLOSE]  = "close",
-    [FRAME_OPCODE_PING]  = "ping",
-    [FRAME_OPCODE_PONG]  = "pong",
+    [FRAME_OPCODE_TEXT] = "text",
+    [FRAME_OPCODE_BINARY] = "binary",
+    [FRAME_OPCODE_CLOSE] = "close",
+    [FRAME_OPCODE_PING] = "ping",
+    [FRAME_OPCODE_PONG] = "pong",
 };
 
-void frame_print(const frame_t *frame)
+void
+frame_print(const frame_t *frame)
 {
-    printf(
-        "frame{final: %d, opcode: %s, payload_length: %zu, payload: ",
-        frame->final,
-        opcode_to_string[frame->opcode],
-        frame->payload_length);
-    switch (frame->opcode) {
+    printf("frame{final: %d, opcode: %s, payload_length: %zu, payload: ",
+           frame->final,
+           opcode_to_string[frame->opcode],
+           frame->payload_length);
+    switch (frame->opcode)
+    {
     case FRAME_OPCODE_BINARY:
         printf("[");
-        for (size_t i = 0; i <frame->payload_length; i++)
-            printf("%x", frame->payload.binary[i]);
+        if (frame->payload_length < 100)
+        {
+            for (size_t i = 0; i < frame->payload_length; i++)
+                printf("%x", frame->payload.binary[i]);
+        }
+        else
+            printf("too long to print");
         printf("]");
         break;
     case FRAME_OPCODE_TEXT:
-        printf("\"%s\"", frame->payload.text);
+        if (frame->payload_length < 100)
+        {
+            printf("\"%s\"", frame->payload.text);
+        }
+        else
+            printf("too long to print");
+        break;
+    case FRAME_OPCODE_CLOSE:
+        printf("[%u] ", frame->payload.close.status_code);
+        if (frame->payload.close.reason != NULL)
+        {
+            for (size_t i = 0; i < frame->payload_length - 2; i++)
+                printf("%c", frame->payload.close.reason[i]);
+        }
         break;
     default:
         printf("none");
     }
     printf("}\n");
+}
+
+void
+frame_destroy(frame_t *frame)
+{
+    switch (frame->opcode)
+    {
+    case FRAME_OPCODE_BINARY:
+        free(frame->payload.binary);
+        break;
+    case FRAME_OPCODE_TEXT:
+        free(frame->payload.text);
+        break;
+    case FRAME_OPCODE_CLOSE:
+        free(frame->payload.close.reason);
+        break;
+    default:
+        break;
+    }
 }
