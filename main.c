@@ -41,7 +41,7 @@ main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8081),
+        .sin_port = htons(8080),
         .sin_addr = {.s_addr = INADDR_ANY},
     };
     int ret = bind(sockfd, (struct sockaddr *)&addr, sizeof addr);
@@ -66,16 +66,21 @@ main()
         ret = send(client_fd, response, strlen(response), 0);
         assert(ret != -1);
 
+        size_t remining_data_size = 0;
+        uint8_t remining_data[4096];
         while (running)
         {
             frame_parser_t parser;
             frame_parser_init(&parser);
             frame_parser_injest_result_t injest_result;
+            // Injest data that was possibly left from multiple frames in one TCP recv
+            size_t x;
+            injest_result = frame_parser_injest(&parser, remining_data, remining_data_size, &x);
 
             uint8_t data[4096];
             int      data_size;
             bool     recv_error = false;
-            do
+            while (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
             {
                 data_size = recv(client_fd, data, sizeof(data), 0);
                 printf("RECV: %d\n", data_size);
@@ -90,8 +95,12 @@ main()
                     recv_error = true;
                     break;
                 }
-                injest_result = frame_parser_injest(&parser, data, data_size);
-            } while (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING);
+                injest_result = frame_parser_injest(&parser, data, data_size, &remining_data_size);
+                if (remining_data_size > 0) {
+                    memcpy(remining_data, data + data_size - remining_data_size, remining_data_size);
+                    remining_data_size = 0;
+                }
+            }
 
             if (recv_error)
             {
