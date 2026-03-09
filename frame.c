@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+
 struct frame_header_layout
 {
     // First byte in network order (logical protocol order is
@@ -25,7 +27,7 @@ frame_parser_init(frame_parser_t *parser)
 {
     parser->header_parsed = false;
     parser->injested_payload_length = 0;
-    // parser->header_buffer_position = 0;
+    parser->header_buffer_position = 0;
 }
 
 frame_parser_injest_result_t
@@ -33,13 +35,19 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size)
 {
     if (!parser->header_parsed)
     {
-        size_t current_size = sizeof(struct frame_header_layout);
-        if (size < current_size)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
-        struct frame_header_layout *layout = (void *)data;
+        size_t copied_size = MIN(size, sizeof(parser->header_buffer) - parser->header_buffer_position);
+        memcpy(
+            parser->header_buffer + parser->header_buffer_position,
+            data,
+            copied_size);
+        size_t initial_header_buffer_position = parser->header_buffer_position;
+        parser->header_buffer_position += copied_size;
+        if (parser->header_buffer_position < sizeof(struct frame_header_layout))
+            return FRAME_PARSER_INJEST_RESULT_PENDING;
+
+        struct frame_header_layout *layout = (void *)parser->header_buffer;
         parser->frame.final = layout->final_frame;
         parser->frame.opcode = layout->opcode;
-        data += sizeof(struct frame_header_layout);
         // Check if the start layout is valid
         if (parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
             parser->frame.opcode != FRAME_OPCODE_TEXT &&
@@ -53,35 +61,47 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size)
              parser->frame.opcode == FRAME_OPCODE_PONG) &&
             layout->payload_length_start > 125)
             return FRAME_PARSER_INJEST_RESULT_ERROR;
+        if (layout->reserved != 0)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        // Client to server MUST be masked
+        if (!layout->mask)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        size_t size_of_payload_length = 0;
+        uint8_t *header_buffer_ptr = parser->header_buffer + sizeof(struct frame_header_layout);
         // Extract the payload size
         if (layout->payload_length_start < 126)
             parser->frame.payload_length = layout->payload_length_start;
         else if (layout->payload_length_start == 126)
         {
-            current_size += sizeof(uint16_t);
-            if (size < current_size)
-                return FRAME_PARSER_INJEST_RESULT_ERROR;
-            parser->frame.payload_length = ntohs(*(uint16_t *)data);
-            data += sizeof(uint16_t);
+            size_of_payload_length = sizeof(uint16_t);
+            if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length)
+                return FRAME_PARSER_INJEST_RESULT_PENDING;
+            parser->frame.payload_length = ntohs(*(uint16_t *)header_buffer_ptr);
         }
         else if (layout->payload_length_start == 127)
         {
-            current_size += sizeof(uint64_t);
-            if (size < current_size)
-                return FRAME_PARSER_INJEST_RESULT_ERROR;
-            parser->frame.payload_length = be64toh(*(uint64_t *)data);
-            data += sizeof(uint64_t);
+            size_of_payload_length = sizeof(uint64_t);
+            if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length)
+                return FRAME_PARSER_INJEST_RESULT_PENDING;
+            parser->frame.payload_length = be64toh(*(uint64_t *)header_buffer_ptr);
         }
-        // Client to server MUST be masked
-        if (!layout->mask)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
-        current_size += sizeof(uint32_t);
-        if (size < current_size)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
-        parser->masking_key = *(uint32_t *)data;
-        data += sizeof(uint32_t);
+        header_buffer_ptr += size_of_payload_length;
+
+        if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length + sizeof(uint32_t))
+            return FRAME_PARSER_INJEST_RESULT_PENDING;
+        parser->masking_key = *(uint32_t *)header_buffer_ptr;
         parser->header_parsed = true;
-        size -= current_size;
+
+        size_t final_size = sizeof(struct frame_header_layout) + size_of_payload_length + sizeof(uint32_t);
+        size_t used_size = final_size - initial_header_buffer_position;
+        data += used_size;
+        size -= used_size;
+
+        if (size > parser->frame.payload_length) {
+            printf("Error: this is strange\n");
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        }
+
         // Initialize empty payload
         switch (parser->frame.opcode)
         {
@@ -107,8 +127,10 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size)
         printf("Parsed header: %zu size: %zu\n", parser->frame.payload_length, size);
     }
     // Unmask data payload
-    for (size_t i = 0; i < size; i++)
-        data[i] = data[i] ^ ((uint8_t *)&parser->masking_key)[i % 4];
+    for (size_t i = 0; i < size; i++) {
+        size_t offset = i + parser->injested_payload_length;
+        data[i] ^= ((uint8_t *)&parser->masking_key)[offset % 4];
+    }
 
     printf("Injesting data for %zu of %zu -> %zu\n", parser->frame.payload_length, parser->injested_payload_length, size);
     switch (parser->frame.opcode)
@@ -120,7 +142,7 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size)
         break;
     case FRAME_OPCODE_TEXT:
         memcpy(parser->frame.payload.text + parser->injested_payload_length, data, size);
-        if (parser->injested_payload_length == parser->frame.payload_length)
+        if (parser->injested_payload_length + size == parser->frame.payload_length)
             parser->frame.payload.text[parser->frame.payload_length] = '\0';
         break;
     case FRAME_OPCODE_CLOSE:

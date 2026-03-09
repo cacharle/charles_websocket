@@ -34,9 +34,8 @@ typedef struct {
     uint32_t masking_key;
     bool header_parsed;
     size_t injested_payload_length;
-    // TODO?
-    // uint8_t header_buffer[16];
-    // size_t header_buffer_position;
+    uint8_t header_buffer[16];
+    size_t header_buffer_position;
 } frame_parser_t;
 
 typedef enum {

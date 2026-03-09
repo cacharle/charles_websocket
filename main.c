@@ -41,7 +41,7 @@ main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8080),
+        .sin_port = htons(8081),
         .sin_addr = {.s_addr = INADDR_ANY},
     };
     int ret = bind(sockfd, (struct sockaddr *)&addr, sizeof addr);
@@ -78,6 +78,7 @@ main()
             do
             {
                 data_size = recv(client_fd, data, sizeof(data), 0);
+                printf("RECV: %d\n", data_size);
                 if (data_size == -1)
                 {
                     recv_error = true;
