@@ -68,46 +68,43 @@ main()
 
         while (running)
         {
-            uint8_t *buffer = NULL;
-            size_t   recv_size = 4096;
-            int      nbytes;
-            size_t   current_buffer_size = 0;
+            frame_parser_t parser;
+            frame_parser_init(&parser);
+            frame_parser_injest_result_t injest_result;
+
+            uint8_t data[4096];
+            int      data_size;
             bool     recv_error = false;
             do
             {
-                buffer = realloc(buffer, current_buffer_size + recv_size + 1);
-                nbytes = recv(client_fd, buffer + current_buffer_size, recv_size, 0);
-                if (nbytes == -1)
+                data_size = recv(client_fd, data, sizeof(data), 0);
+                if (data_size == -1)
                 {
                     recv_error = true;
                     break;
                 }
-                if (nbytes == 0)
+                if (data_size == 0)
                 {
                     printf("Peer closed connection");
-                    return 0;
+                    recv_error = true;
+                    break;
                 }
-                current_buffer_size += nbytes;
-            } while (nbytes == recv_size);
+                injest_result = frame_parser_injest(&parser, data, data_size);
+            } while (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING);
+
             if (recv_error)
             {
-                free(buffer);
                 printf("ERROR recv: %s\n", strerror(errno));
                 break;
             }
-            buffer[current_buffer_size] = '\0';
-            // printf("Received %d bytes:\n", nbytes);
-            // print_bytes(buffer, nbytes);
-            frame_t f;
-            bool    ok = frame_parse(&f, buffer, current_buffer_size);
-            free(buffer);
-            if (!ok)
+            if (injest_result == FRAME_PARSER_INJEST_RESULT_ERROR)
             {
-                printf("ERROR: something bad during parsing\n");
+                printf("ERROR injest_result\n");
                 break;
             }
+
+            frame_t f = parser.frame;
             frame_print(&f);
-            frame_destroy(&f);
 
             if (f.opcode == FRAME_OPCODE_CLOSE)
             {
@@ -137,13 +134,18 @@ main()
                      f.opcode == FRAME_OPCODE_BINARY)
             {
                 printf("Received text|binary frame, sending same frame back\n");
-                uint8_t *send_buffer = malloc(f.payload_length + 128);
+                uint8_t *send_buffer = malloc(f.payload_length + 16);
                 size_t   send_buffer_size;
                 frame_dump(&f, send_buffer, &send_buffer_size);
                 send(client_fd, send_buffer, send_buffer_size, 0);
+                free(send_buffer);
             }
+
+            frame_destroy(&f);
         }
         close(client_fd);
+
+        printf("---------------------------------------------\n");
     }
 
     close(sockfd);

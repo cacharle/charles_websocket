@@ -25,5 +25,5 @@ async def dump_client(uri):
         await asyncio.gather(receive(), send())
 
 if __name__ == "__main__":
-    uri = "ws://localhost:8080"
+    uri = "ws://localhost:8081"
     asyncio.run(dump_client(uri))

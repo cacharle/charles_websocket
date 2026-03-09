@@ -1,6 +1,6 @@
 all: server
 
-server: main.o frame.o handshake.o
+server: main.o frame.o handshake.o utils.o
 	gcc -o server -lssl -lcrypto $^
 
 %.o: %.c

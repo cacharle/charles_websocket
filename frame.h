@@ -29,8 +29,29 @@ typedef struct  {
     } payload;
 } frame_t;
 
+typedef struct {
+    frame_t frame;
+    uint32_t masking_key;
+    bool header_parsed;
+    size_t injested_payload_length;
+    // TODO?
+    // uint8_t header_buffer[16];
+    // size_t header_buffer_position;
+} frame_parser_t;
+
+typedef enum {
+    FRAME_PARSER_INJEST_RESULT_DONE,
+    FRAME_PARSER_INJEST_RESULT_PENDING,
+    FRAME_PARSER_INJEST_RESULT_ERROR,
+} frame_parser_injest_result_t;
+
+void
+frame_parser_init(frame_parser_t *parser);
+frame_parser_injest_result_t
+frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size);
+
 void frame_dump(frame_t* frame, uint8_t *dest, size_t *dest_size);
-bool frame_parse(frame_t* dest, void *bytes, size_t size);
+// bool frame_parse(frame_t* dest, void *bytes, size_t size);
 void frame_print(const frame_t *frame);
 void frame_destroy(frame_t *frame);
 

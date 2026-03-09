@@ -1,4 +1,5 @@
 #include "frame.h"
+#include "utils.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <limits.h>
@@ -18,6 +19,133 @@ struct frame_header_layout
     uint8_t payload_length_start : 7;
     uint8_t mask                 : 1;
 };
+
+void
+frame_parser_init(frame_parser_t *parser)
+{
+    parser->header_parsed = false;
+    parser->injested_payload_length = 0;
+    // parser->header_buffer_position = 0;
+}
+
+frame_parser_injest_result_t
+frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size)
+{
+    if (!parser->header_parsed)
+    {
+        size_t current_size = sizeof(struct frame_header_layout);
+        if (size < current_size)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        struct frame_header_layout *layout = (void *)data;
+        parser->frame.final = layout->final_frame;
+        parser->frame.opcode = layout->opcode;
+        data += sizeof(struct frame_header_layout);
+        // Check if the start layout is valid
+        if (parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
+            parser->frame.opcode != FRAME_OPCODE_TEXT &&
+            parser->frame.opcode != FRAME_OPCODE_BINARY &&
+            parser->frame.opcode != FRAME_OPCODE_CLOSE &&
+            parser->frame.opcode != FRAME_OPCODE_PING &&
+            parser->frame.opcode != FRAME_OPCODE_PONG)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        if ((parser->frame.opcode == FRAME_OPCODE_CLOSE ||
+             parser->frame.opcode == FRAME_OPCODE_PING ||
+             parser->frame.opcode == FRAME_OPCODE_PONG) &&
+            layout->payload_length_start > 125)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        // Extract the payload size
+        if (layout->payload_length_start < 126)
+            parser->frame.payload_length = layout->payload_length_start;
+        else if (layout->payload_length_start == 126)
+        {
+            current_size += sizeof(uint16_t);
+            if (size < current_size)
+                return FRAME_PARSER_INJEST_RESULT_ERROR;
+            parser->frame.payload_length = ntohs(*(uint16_t *)data);
+            data += sizeof(uint16_t);
+        }
+        else if (layout->payload_length_start == 127)
+        {
+            current_size += sizeof(uint64_t);
+            if (size < current_size)
+                return FRAME_PARSER_INJEST_RESULT_ERROR;
+            parser->frame.payload_length = be64toh(*(uint64_t *)data);
+            data += sizeof(uint64_t);
+        }
+        // Client to server MUST be masked
+        if (!layout->mask)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        current_size += sizeof(uint32_t);
+        if (size < current_size)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
+        parser->masking_key = *(uint32_t *)data;
+        data += sizeof(uint32_t);
+        parser->header_parsed = true;
+        size -= current_size;
+        // Initialize empty payload
+        switch (parser->frame.opcode)
+        {
+        case FRAME_OPCODE_BINARY:
+        case FRAME_OPCODE_PING:
+        case FRAME_OPCODE_PONG:
+            parser->frame.payload.binary = xmalloc(parser->frame.payload_length);
+            break;
+        case FRAME_OPCODE_TEXT:
+            parser->frame.payload.text = xmalloc(parser->frame.payload_length + 1);
+            break;
+        case FRAME_OPCODE_CLOSE:
+            parser->frame.payload.close.status_code = 0;
+            if (parser->frame.payload_length > 2)
+                parser->frame.payload.close.reason =
+                    xmalloc(parser->frame.payload_length - 2);
+            else
+                parser->frame.payload.close.reason = NULL;
+            break;
+        case FRAME_OPCODE_CONTINUATION:
+            break;
+        }
+        printf("Parsed header: %zu size: %zu\n", parser->frame.payload_length, size);
+    }
+    // Unmask data payload
+    for (size_t i = 0; i < size; i++)
+        data[i] = data[i] ^ ((uint8_t *)&parser->masking_key)[i % 4];
+
+    printf("Injesting data for %zu of %zu -> %zu\n", parser->frame.payload_length, parser->injested_payload_length, size);
+    switch (parser->frame.opcode)
+    {
+    case FRAME_OPCODE_BINARY:
+    case FRAME_OPCODE_PING:
+    case FRAME_OPCODE_PONG:
+        memcpy(parser->frame.payload.binary + parser->injested_payload_length, data, size);
+        break;
+    case FRAME_OPCODE_TEXT:
+        memcpy(parser->frame.payload.text + parser->injested_payload_length, data, size);
+        if (parser->injested_payload_length == parser->frame.payload_length)
+            parser->frame.payload.text[parser->frame.payload_length] = '\0';
+        break;
+    case FRAME_OPCODE_CLOSE:
+        if (parser->injested_payload_length == 0 && size >= 2)
+        {
+            parser->frame.payload.close.status_code = ntohs(*(uint16_t *)data);
+            data += sizeof(uint16_t);
+            size -= sizeof(uint16_t);
+            parser->injested_payload_length += 2;
+        }
+        if (parser->frame.payload_length > parser->injested_payload_length)
+            memcpy(parser->frame.payload.close.reason, data, size);
+        break;
+    default:
+        break;
+    }
+    // Check if we're done parsing the frame
+    parser->injested_payload_length += size;
+    if (parser->injested_payload_length > parser->frame.payload_length)
+        return FRAME_PARSER_INJEST_RESULT_ERROR;
+    if (parser->injested_payload_length == parser->frame.payload_length)
+        return FRAME_PARSER_INJEST_RESULT_DONE;
+    else
+        return FRAME_PARSER_INJEST_RESULT_PENDING;
+}
 
 void
 frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
@@ -69,96 +197,97 @@ frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
     *dest_size = header_size + frame->payload_length;
 }
 
-bool
-frame_parse(frame_t *frame, void *bytes, size_t size)
-{
-    size_t current_size = 0;
-    current_size += sizeof(struct frame_header_layout);
-    if (size < current_size)
-        return false;
-    struct frame_header_layout *layout = bytes;
-    frame->final = layout->final_frame;
-    frame->opcode = layout->opcode;
-    void *bytes_rest = bytes + sizeof(struct frame_header_layout);
-
-    if (frame->opcode != FRAME_OPCODE_CONTINUATION &&
-        frame->opcode != FRAME_OPCODE_TEXT && frame->opcode != FRAME_OPCODE_BINARY &&
-        frame->opcode != FRAME_OPCODE_CLOSE && frame->opcode != FRAME_OPCODE_PING &&
-        frame->opcode != FRAME_OPCODE_PONG)
-        return false;
-
-    if ((frame->opcode == FRAME_OPCODE_CLOSE || frame->opcode == FRAME_OPCODE_PING ||
-         frame->opcode == FRAME_OPCODE_PONG) &&
-        layout->payload_length_start > 125)
-        return false;
-
-    if (layout->payload_length_start < 126)
-    {
-        frame->payload_length = layout->payload_length_start;
-    }
-    else if (layout->payload_length_start == 126)
-    {
-        current_size += sizeof(uint16_t);
-        if (size < current_size)
-            return false;
-        frame->payload_length = ntohs(*(uint16_t *)bytes_rest);
-        bytes_rest += sizeof(uint16_t);
-    }
-    else if (layout->payload_length_start == 127)
-    {
-        current_size += sizeof(uint64_t);
-        if (size < current_size)
-            return false;
-        frame->payload_length = be64toh(*(uint64_t *)bytes_rest);
-        bytes_rest += sizeof(uint64_t);
-    }
-    if (layout->mask)
-    {
-        current_size += sizeof(uint32_t);
-        if (size < current_size)
-            return false;
-        uint32_t masking_key = *(uint32_t *)bytes_rest;
-        bytes_rest += sizeof(uint32_t);
-        uint8_t *tmp = bytes_rest;
-        if (size < current_size + frame->payload_length)
-            return false;
-        for (size_t i = 0; i < frame->payload_length; i++)
-            tmp[i] = tmp[i] ^ ((uint8_t *)&masking_key)[i % 4];
-    }
-    switch (frame->opcode)
-    {
-    case FRAME_OPCODE_BINARY:
-    case FRAME_OPCODE_PING:
-    case FRAME_OPCODE_PONG:
-        frame->payload.binary = malloc(frame->payload_length);
-        memcpy(frame->payload.binary, bytes_rest, frame->payload_length);
-        break;
-    case FRAME_OPCODE_TEXT:
-        frame->payload.text = malloc(frame->payload_length + 1);
-        memcpy(frame->payload.text, bytes_rest, frame->payload_length);
-        frame->payload.text[frame->payload_length] = '\0';
-        break;
-    case FRAME_OPCODE_CLOSE:
-        frame->payload.close.status_code = 0;
-        frame->payload.close.reason = NULL;
-        if (frame->payload_length >= 2)
-        {
-            frame->payload.close.status_code = ntohs(*(uint16_t *)bytes_rest);
-            bytes_rest += sizeof(uint16_t);
-            if (frame->payload_length > 2)
-            {
-                frame->payload.close.reason = malloc(frame->payload_length - 2);
-                memcpy(frame->payload.close.reason,
-                       bytes_rest,
-                       frame->payload_length - 2);
-            }
-        }
-        break;
-    default:
-        break;
-    }
-    return true;
-}
+// bool
+// frame_parse(frame_t *frame, void *bytes, size_t size)
+// {
+//     size_t current_size = 0;
+//     current_size += sizeof(struct frame_header_layout);
+//     if (size < current_size)
+//         return false;
+//     struct frame_header_layout *layout = bytes;
+//     frame->final = layout->final_frame;
+//     frame->opcode = layout->opcode;
+//     void *bytes_rest = bytes + sizeof(struct frame_header_layout);
+//
+//     if (frame->opcode != FRAME_OPCODE_CONTINUATION &&
+//         frame->opcode != FRAME_OPCODE_TEXT && frame->opcode != FRAME_OPCODE_BINARY &&
+//         frame->opcode != FRAME_OPCODE_CLOSE && frame->opcode != FRAME_OPCODE_PING &&
+//         frame->opcode != FRAME_OPCODE_PONG)
+//         return false;
+//
+//     if ((frame->opcode == FRAME_OPCODE_CLOSE || frame->opcode == FRAME_OPCODE_PING ||
+//          frame->opcode == FRAME_OPCODE_PONG) &&
+//         layout->payload_length_start > 125)
+//         return false;
+//
+//     if (layout->payload_length_start < 126)
+//     {
+//         frame->payload_length = layout->payload_length_start;
+//     }
+//     else if (layout->payload_length_start == 126)
+//     {
+//         current_size += sizeof(uint16_t);
+//         if (size < current_size)
+//             return false;
+//         frame->payload_length = ntohs(*(uint16_t *)bytes_rest);
+//         bytes_rest += sizeof(uint16_t);
+//     }
+//     else if (layout->payload_length_start == 127)
+//     {
+//         current_size += sizeof(uint64_t);
+//         if (size < current_size)
+//             return false;
+//         frame->payload_length = be64toh(*(uint64_t *)bytes_rest);
+//         bytes_rest += sizeof(uint64_t);
+//     }
+//     if (!layout->mask)
+//         return false;  // client to server MUST be masked
+//
+//     current_size += sizeof(uint32_t);
+//     if (size < current_size)
+//         return false;
+//     uint32_t masking_key = *(uint32_t *)bytes_rest;
+//     bytes_rest += sizeof(uint32_t);
+//     uint8_t *tmp = bytes_rest;
+//     if (size < current_size + frame->payload_length)
+//         return false;
+//     for (size_t i = 0; i < frame->payload_length; i++)
+//         tmp[i] = tmp[i] ^ ((uint8_t *)&masking_key)[i % 4];
+//
+//     switch (frame->opcode)
+//     {
+//     case FRAME_OPCODE_BINARY:
+//     case FRAME_OPCODE_PING:
+//     case FRAME_OPCODE_PONG:
+//         frame->payload.binary = malloc(frame->payload_length);
+//         memcpy(frame->payload.binary, bytes_rest, frame->payload_length);
+//         break;
+//     case FRAME_OPCODE_TEXT:
+//         frame->payload.text = malloc(frame->payload_length + 1);
+//         memcpy(frame->payload.text, bytes_rest, frame->payload_length);
+//         frame->payload.text[frame->payload_length] = '\0';
+//         break;
+//     case FRAME_OPCODE_CLOSE:
+//         frame->payload.close.status_code = 0;
+//         frame->payload.close.reason = NULL;
+//         if (frame->payload_length >= 2)
+//         {
+//             frame->payload.close.status_code = ntohs(*(uint16_t *)bytes_rest);
+//             bytes_rest += sizeof(uint16_t);
+//             if (frame->payload_length > 2)
+//             {
+//                 frame->payload.close.reason = malloc(frame->payload_length - 2);
+//                 memcpy(frame->payload.close.reason,
+//                        bytes_rest,
+//                        frame->payload_length - 2);
+//             }
+//         }
+//         break;
+//     default:
+//         break;
+//     }
+//     return true;
+// }
 
 char *opcode_close_status_string[] = {
     [1000] = "Normal closure",
@@ -203,8 +332,18 @@ frame_print(const frame_t *frame)
         {
             printf("\"%s\"", frame->payload.text);
         }
-        else
-            printf("too long to print");
+        else {
+            char x = frame->payload.text[0];
+            int count = 0;
+            for (size_t i = 0; i < frame->payload_length; i++) {
+                if (frame->payload.text[i] != x) {
+                    printf("payload at %zu, different: %x vs %x\n", i, x, frame->payload.text[i]);
+                    count++;
+                    break;
+                }
+            }
+            printf("too long to print %zu", count);
+        }
         break;
     case FRAME_OPCODE_CLOSE:
         printf("[%u] ", frame->payload.close.status_code);
