@@ -1,5 +1,3 @@
-#include "frame.h"
-#include "handshake.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <ctype.h>
@@ -12,6 +10,10 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include "handshake.h"
+#include "frame.h"
+#include "utils.h"
 
 static bool running = true;
 void
@@ -32,6 +34,11 @@ print_bytes(unsigned char *bytes, size_t len)
     }
     fputc('\n', stdout);
 }
+
+static frame_opcode_t current_fragmented_opcode = -1;
+static size_t current_fragmented_payload_length = 0;
+static void *current_fragmented_payload = NULL;
+
 
 bool handle_injest_result(frame_parser_injest_result_t injest_result, int client_fd, frame_t *frame)
 {
@@ -57,19 +64,63 @@ bool handle_injest_result(frame_parser_injest_result_t injest_result, int client
         return true;
     case FRAME_OPCODE_TEXT:
     case FRAME_OPCODE_BINARY: {
-        printf("Received text|binary frame, sending same frame back\n");
-        uint8_t *send_buffer = malloc(frame->payload_length + 16);
-        size_t   send_buffer_size;
-        frame_dump(frame, send_buffer, &send_buffer_size);
-        send(client_fd, send_buffer, send_buffer_size, 0);
-        free(send_buffer);
+        if (current_fragmented_payload != NULL)
+            return false;
+        if (frame->final) {
+            printf("Received text|binary frame, sending same frame back\n");
+            if (frame->opcode == FRAME_OPCODE_TEXT &&
+               !is_valid_utf8((unsigned char*)frame->payload.text, frame->payload_length))
+                return false;
+            uint8_t *send_buffer = malloc(frame->payload_length + 16);
+            size_t   send_buffer_size;
+            frame_dump(frame, send_buffer, &send_buffer_size);
+            send(client_fd, send_buffer, send_buffer_size, 0);
+            free(send_buffer);
+        } else {
+            printf("Non final frame encountered for text|binary");
+            current_fragmented_opcode = frame->opcode;
+            current_fragmented_payload_length = frame->payload_length;
+            current_fragmented_payload =  malloc(frame->payload_length);
+            memcpy(current_fragmented_payload, frame->payload.binary, frame->payload_length);
+            return true;
+        }
         return true;
     case FRAME_OPCODE_PONG:
         printf("FRAME_OPCODE_PONG ignored\n");
         return true;
     case FRAME_OPCODE_CONTINUATION:
-        printf("FRAME_OPCODE_CONTINUATION not handled\n");
-        return false;
+        if (current_fragmented_payload == NULL)
+            return false;
+        printf("FRAME_OPCODE_CONTINUATION handled\n");
+        current_fragmented_payload = realloc(
+            current_fragmented_payload,
+            current_fragmented_payload_length + frame->payload_length);
+        memcpy(current_fragmented_payload + current_fragmented_payload_length,
+                frame->payload.binary, frame->payload_length);
+        current_fragmented_payload_length += frame->payload_length;
+        if (frame->final) {
+            printf("FRAME_OPCODE_CONTINUATION final\n");
+
+            if (current_fragmented_opcode == FRAME_OPCODE_TEXT &&
+                !is_valid_utf8((unsigned char*)current_fragmented_payload, current_fragmented_payload_length))
+                return false;
+            uint8_t *send_buffer = malloc(current_fragmented_payload_length + 16);
+            size_t   send_buffer_size;
+            frame_t defragmented_frame = {
+                .final = true,
+                .opcode = current_fragmented_opcode,
+                .payload_length = current_fragmented_payload_length,
+                .payload.binary = current_fragmented_payload,
+            };
+            frame_dump(&defragmented_frame, send_buffer, &send_buffer_size);
+            send(client_fd, send_buffer, send_buffer_size, 0);
+            free(send_buffer);
+            frame_destroy(&defragmented_frame);
+            current_fragmented_opcode = -1;
+            current_fragmented_payload = NULL;
+            current_fragmented_payload_length = 0;
+        }
+        return true;
     }
     }
     abort();
@@ -83,7 +134,7 @@ main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8081),
+        .sin_port = htons(8080),
         .sin_addr = {.s_addr = INADDR_ANY},
     };
     int ret = bind(sockfd, (struct sockaddr *)&addr, sizeof addr);
@@ -108,13 +159,17 @@ main()
         ret = send(client_fd, response, strlen(response), 0);
         assert(ret != -1);
 
+        current_fragmented_opcode = -1;
+        current_fragmented_payload_length = 0;
+        current_fragmented_payload = NULL;
+
         size_t remining_data_size = 0;
         uint8_t remining_data[4096];
         while (running)
         {
             frame_parser_t parser;
             frame_parser_init(&parser);
-            frame_parser_injest_result_t injest_result;
+            frame_parser_injest_result_t injest_result = FRAME_PARSER_INJEST_RESULT_PENDING;
 
             bool keep_going = true;
             while (keep_going && remining_data_size != 0) {

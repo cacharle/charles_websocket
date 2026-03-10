@@ -63,6 +63,12 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
              parser->frame.opcode == FRAME_OPCODE_PONG) &&
             layout->payload_length_start > 125)
             return FRAME_PARSER_INJEST_RESULT_ERROR;
+
+        if (!parser->frame.final &&
+            parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
+            parser->frame.opcode != FRAME_OPCODE_TEXT &&
+            parser->frame.opcode != FRAME_OPCODE_BINARY)
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
         if (layout->reserved != 0)
             return FRAME_PARSER_INJEST_RESULT_ERROR;
         // Client to server MUST be masked
@@ -99,17 +105,13 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
         data += used_size;
         size -= used_size;
 
-        // if (size > parser->frame.payload_length) {
-        //     printf("Error: this is strange\n");
-        //     return FRAME_PARSER_INJEST_RESULT_ERROR;
-        // }
-
         // Initialize empty payload
         switch (parser->frame.opcode)
         {
         case FRAME_OPCODE_BINARY:
         case FRAME_OPCODE_PING:
         case FRAME_OPCODE_PONG:
+        case FRAME_OPCODE_CONTINUATION:
             parser->frame.payload.binary = xmalloc(parser->frame.payload_length);
             break;
         case FRAME_OPCODE_TEXT:
@@ -122,8 +124,6 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
                     xmalloc(parser->frame.payload_length - 2);
             else
                 parser->frame.payload.close.reason = NULL;
-            break;
-        case FRAME_OPCODE_CONTINUATION:
             break;
         }
         printf("Parsed header: %zu size: %zu\n", parser->frame.payload_length, size);
@@ -147,6 +147,7 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
     case FRAME_OPCODE_BINARY:
     case FRAME_OPCODE_PING:
     case FRAME_OPCODE_PONG:
+    case FRAME_OPCODE_CONTINUATION:
         memcpy(parser->frame.payload.binary + parser->injested_payload_length, data, size);
         break;
     case FRAME_OPCODE_TEXT:
@@ -172,12 +173,8 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
     parser->injested_payload_length += size;
     if (parser->injested_payload_length > parser->frame.payload_length)
         return FRAME_PARSER_INJEST_RESULT_ERROR;
-    if (parser->injested_payload_length == parser->frame.payload_length) {
-        if (parser->frame.opcode == FRAME_OPCODE_TEXT
-            && !is_valid_utf8((unsigned char*)parser->frame.payload.text, parser->frame.payload_length))
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
+    if (parser->injested_payload_length == parser->frame.payload_length)
         return FRAME_PARSER_INJEST_RESULT_DONE;
-    }
     else
         return FRAME_PARSER_INJEST_RESULT_PENDING;
 }
@@ -285,7 +282,7 @@ frame_print(const frame_t *frame)
                     break;
                 }
             }
-            printf("too long to print %zu", count);
+            printf("too long to print %d", count);
         }
         break;
     case FRAME_OPCODE_CLOSE:
