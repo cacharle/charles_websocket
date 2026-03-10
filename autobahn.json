@@ -2,7 +2,7 @@
   "outdir": "./reports/server",
   "servers": [
     {
-      "url": "ws://localhost:8080"
+      "url": "ws://localhost:8081"
     }
   ],
   "cases": ["2.9"],

@@ -172,8 +172,12 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
     parser->injested_payload_length += size;
     if (parser->injested_payload_length > parser->frame.payload_length)
         return FRAME_PARSER_INJEST_RESULT_ERROR;
-    if (parser->injested_payload_length == parser->frame.payload_length)
+    if (parser->injested_payload_length == parser->frame.payload_length) {
+        if (parser->frame.opcode == FRAME_OPCODE_TEXT
+            && !is_valid_utf8((unsigned char*)parser->frame.payload.text, parser->frame.payload_length))
+            return FRAME_PARSER_INJEST_RESULT_ERROR;
         return FRAME_PARSER_INJEST_RESULT_DONE;
+    }
     else
         return FRAME_PARSER_INJEST_RESULT_PENDING;
 }

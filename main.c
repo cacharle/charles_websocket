@@ -33,6 +33,48 @@ print_bytes(unsigned char *bytes, size_t len)
     fputc('\n', stdout);
 }
 
+bool handle_injest_result(frame_parser_injest_result_t injest_result, int client_fd, frame_t *frame)
+{
+    if (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
+        return true;
+    if (injest_result == FRAME_PARSER_INJEST_RESULT_ERROR) {
+        printf("ERROR injest_result\n");
+        return false;
+    }
+    frame_print(frame);
+    switch (frame->opcode)
+    {
+    case FRAME_OPCODE_CLOSE:
+        // printf("Received close frame, sending close\n");
+        return false;
+    case FRAME_OPCODE_PING:
+        printf("Received ping frame, sending pong\n");
+        frame->opcode = FRAME_OPCODE_PONG;
+        uint8_t send_buffer[512];
+        size_t  send_buffer_size;
+        frame_dump(frame, send_buffer, &send_buffer_size);
+        send(client_fd, send_buffer, send_buffer_size, 0);
+        return true;
+    case FRAME_OPCODE_TEXT:
+    case FRAME_OPCODE_BINARY: {
+        printf("Received text|binary frame, sending same frame back\n");
+        uint8_t *send_buffer = malloc(frame->payload_length + 16);
+        size_t   send_buffer_size;
+        frame_dump(frame, send_buffer, &send_buffer_size);
+        send(client_fd, send_buffer, send_buffer_size, 0);
+        free(send_buffer);
+        return true;
+    case FRAME_OPCODE_PONG:
+        printf("FRAME_OPCODE_PONG ignored\n");
+        return true;
+    case FRAME_OPCODE_CONTINUATION:
+        printf("FRAME_OPCODE_CONTINUATION not handled\n");
+        return false;
+    }
+    }
+    abort();
+}
+
 int
 main()
 {
@@ -41,7 +83,7 @@ main()
     assert(sockfd > 0);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8080),
+        .sin_port = htons(8081),
         .sin_addr = {.s_addr = INADDR_ANY},
     };
     int ret = bind(sockfd, (struct sockaddr *)&addr, sizeof addr);
@@ -73,9 +115,25 @@ main()
             frame_parser_t parser;
             frame_parser_init(&parser);
             frame_parser_injest_result_t injest_result;
-            // Injest data that was possibly left from multiple frames in one TCP recv
-            size_t x;
-            injest_result = frame_parser_injest(&parser, remining_data, remining_data_size, &x);
+
+            bool keep_going = true;
+            while (keep_going && remining_data_size != 0) {
+                // Injest data that was possibly left from multiple frames in one TCP recv
+                size_t initial_remining_data_size = remining_data_size;
+                injest_result = frame_parser_injest(&parser, remining_data, remining_data_size, &remining_data_size);
+                printf("injest_result %d\n", injest_result);
+                keep_going = handle_injest_result(injest_result, client_fd, &parser.frame);
+                printf("here2 keep_going %d\n", keep_going);
+                if (injest_result == FRAME_PARSER_INJEST_RESULT_DONE)
+                    frame_parser_init(&parser);
+                // Advance the remining_data buffer
+                memmove(
+                    remining_data,
+                    remining_data + initial_remining_data_size - remining_data_size,
+                    remining_data_size);
+            }
+            if (!keep_going)
+                break;
 
             uint8_t data[4096];
             int      data_size;
@@ -98,7 +156,6 @@ main()
                 injest_result = frame_parser_injest(&parser, data, data_size, &remining_data_size);
                 if (remining_data_size > 0) {
                     memcpy(remining_data, data + data_size - remining_data_size, remining_data_size);
-                    remining_data_size = 0;
                 }
             }
 
@@ -107,52 +164,26 @@ main()
                 printf("ERROR recv: %s\n", strerror(errno));
                 break;
             }
-            if (injest_result == FRAME_PARSER_INJEST_RESULT_ERROR)
-            {
-                printf("ERROR injest_result\n");
+            // frame_print(&f);
+            keep_going = handle_injest_result(injest_result, client_fd, &parser.frame);
+            printf("here keep_going %d\n", keep_going);
+            if (!keep_going)
                 break;
-            }
-
-            frame_t f = parser.frame;
-            frame_print(&f);
-
-            if (f.opcode == FRAME_OPCODE_CLOSE)
-            {
-                printf("Received close frame, sending close\n");
-                frame_t closing_frame = {
-                    .final = true,
-                    .opcode = FRAME_OPCODE_CLOSE,
-                    .payload_length = 2,
-                    .payload.close.status_code = 1000,
-                };
-                uint8_t send_buffer[512];
-                size_t  send_buffer_size;
-                frame_dump(&closing_frame, send_buffer, &send_buffer_size);
-                send(client_fd, send_buffer, send_buffer_size, 0);
-                break;
-            }
-            else if (f.opcode == FRAME_OPCODE_PING)
-            {
-                printf("Received ping frame, sending pong\n");
-                f.opcode = FRAME_OPCODE_PONG;
-                uint8_t send_buffer[512];
-                size_t  send_buffer_size;
-                frame_dump(&f, send_buffer, &send_buffer_size);
-                send(client_fd, send_buffer, send_buffer_size, 0);
-            }
-            else if (f.opcode == FRAME_OPCODE_TEXT ||
-                     f.opcode == FRAME_OPCODE_BINARY)
-            {
-                printf("Received text|binary frame, sending same frame back\n");
-                uint8_t *send_buffer = malloc(f.payload_length + 16);
-                size_t   send_buffer_size;
-                frame_dump(&f, send_buffer, &send_buffer_size);
-                send(client_fd, send_buffer, send_buffer_size, 0);
-                free(send_buffer);
-            }
-
-            frame_destroy(&f);
+            frame_destroy(&parser.frame);
         }
+
+        // Always send close message before closing TCP socket
+        frame_t closing_frame = {
+            .final = true,
+            .opcode = FRAME_OPCODE_CLOSE,
+            .payload_length = 2,
+            .payload.close.status_code = 1000,
+        };
+        uint8_t send_buffer[512];
+        size_t  send_buffer_size;
+        frame_dump(&closing_frame, send_buffer, &send_buffer_size);
+        send(client_fd, send_buffer, send_buffer_size, 0);
+
         close(client_fd);
 
         printf("---------------------------------------------\n");
