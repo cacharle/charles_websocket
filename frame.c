@@ -229,6 +229,15 @@ frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
     *dest_size = header_size + frame->payload_length;
 }
 
+void frame_send(frame_t *frame, int fd)
+{
+    uint8_t *send_buffer = xmalloc(frame->payload_length + 16);
+    size_t  send_buffer_size;
+    frame_dump(frame, send_buffer, &send_buffer_size);
+    send(fd, send_buffer, send_buffer_size, 0);
+    free(send_buffer);
+}
+
 char *opcode_close_status_string[] = {
     [1000] = "Normal closure",
     [1001] = "Going away",

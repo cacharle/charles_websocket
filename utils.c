@@ -1,13 +1,19 @@
 #include <stdlib.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+
+#include "utils.h"
 
 void *
 xmalloc(size_t size)
 {
     void *ret = malloc(size);
     if (ret == NULL)
-        abort();
+        die("Unable to malloc");
     return ret;
 }
 
@@ -67,4 +73,14 @@ bool is_valid_utf8(const unsigned char *s, size_t len) {
     }
 
     return true;
+}
+
+void die(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    fputs("cws: ", stderr);
+    vfprintf(stderr, format, ap);
+    fprintf(stderr, ": %s", strerror(errno));
+    va_end(ap);
 }
