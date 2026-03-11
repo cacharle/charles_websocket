@@ -1,3 +1,6 @@
+#include "frame.h"
+#include "handshake.h"
+#include "utils.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <ctype.h>
@@ -10,10 +13,6 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include "handshake.h"
-#include "frame.h"
-#include "utils.h"
 
 static bool running = true;
 void
@@ -39,12 +38,15 @@ static frame_opcode_t current_fragmented_opcode = -1;
 static size_t current_fragmented_payload_length = 0;
 static void *current_fragmented_payload = NULL;
 
-
-bool handle_injest_result(frame_parser_injest_result_t injest_result, int client_fd, frame_t *frame)
+bool
+handle_injest_result(frame_parser_injest_result_t injest_result,
+                     int client_fd,
+                     frame_t *frame)
 {
     if (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
         return true;
-    if (injest_result == FRAME_PARSER_INJEST_RESULT_ERROR) {
+    if (injest_result == FRAME_PARSER_INJEST_RESULT_ERROR)
+    {
         printf("ERROR injest_result\n");
         return false;
     }
@@ -58,30 +60,37 @@ bool handle_injest_result(frame_parser_injest_result_t injest_result, int client
         printf("Received ping frame, sending pong\n");
         frame->opcode = FRAME_OPCODE_PONG;
         uint8_t send_buffer[512];
-        size_t  send_buffer_size;
+        size_t send_buffer_size;
         frame_dump(frame, send_buffer, &send_buffer_size);
         send(client_fd, send_buffer, send_buffer_size, 0);
         return true;
     case FRAME_OPCODE_TEXT:
-    case FRAME_OPCODE_BINARY: {
+    case FRAME_OPCODE_BINARY:
+    {
         if (current_fragmented_payload != NULL)
             return false;
-        if (frame->final) {
+        if (frame->final)
+        {
             printf("Received text|binary frame, sending same frame back\n");
             if (frame->opcode == FRAME_OPCODE_TEXT &&
-               !is_valid_utf8((unsigned char*)frame->payload.text, frame->payload_length))
+                !is_valid_utf8((unsigned char *)frame->payload.text,
+                               frame->payload_length))
                 return false;
             uint8_t *send_buffer = malloc(frame->payload_length + 16);
-            size_t   send_buffer_size;
+            size_t send_buffer_size;
             frame_dump(frame, send_buffer, &send_buffer_size);
             send(client_fd, send_buffer, send_buffer_size, 0);
             free(send_buffer);
-        } else {
+        }
+        else
+        {
             printf("Non final frame encountered for text|binary");
             current_fragmented_opcode = frame->opcode;
             current_fragmented_payload_length = frame->payload_length;
-            current_fragmented_payload =  malloc(frame->payload_length);
-            memcpy(current_fragmented_payload, frame->payload.binary, frame->payload_length);
+            current_fragmented_payload = malloc(frame->payload_length);
+            memcpy(current_fragmented_payload,
+                   frame->payload.binary,
+                   frame->payload_length);
             return true;
         }
         return true;
@@ -92,20 +101,23 @@ bool handle_injest_result(frame_parser_injest_result_t injest_result, int client
         if (current_fragmented_payload == NULL)
             return false;
         printf("FRAME_OPCODE_CONTINUATION handled\n");
-        current_fragmented_payload = realloc(
-            current_fragmented_payload,
-            current_fragmented_payload_length + frame->payload_length);
+        current_fragmented_payload =
+            realloc(current_fragmented_payload,
+                    current_fragmented_payload_length + frame->payload_length);
         memcpy(current_fragmented_payload + current_fragmented_payload_length,
-                frame->payload.binary, frame->payload_length);
+               frame->payload.binary,
+               frame->payload_length);
         current_fragmented_payload_length += frame->payload_length;
-        if (frame->final) {
+        if (frame->final)
+        {
             printf("FRAME_OPCODE_CONTINUATION final\n");
 
             if (current_fragmented_opcode == FRAME_OPCODE_TEXT &&
-                !is_valid_utf8((unsigned char*)current_fragmented_payload, current_fragmented_payload_length))
+                !is_valid_utf8((unsigned char *)current_fragmented_payload,
+                               current_fragmented_payload_length))
                 return false;
             uint8_t *send_buffer = malloc(current_fragmented_payload_length + 16);
-            size_t   send_buffer_size;
+            size_t send_buffer_size;
             frame_t defragmented_frame = {
                 .final = true,
                 .opcode = current_fragmented_opcode,
@@ -145,12 +157,12 @@ main()
     while (running)
     {
         struct sockaddr_in client_addr;
-        socklen_t          client_addr_len = sizeof client_addr;
-        int                client_fd =
+        socklen_t client_addr_len = sizeof client_addr;
+        int client_fd =
             accept(sockfd, (struct sockaddr *)&client_addr, &client_addr_len);
 
         char request[4096 + 1];
-        int  nbytes = recv(client_fd, request, 4096, 0);
+        int nbytes = recv(client_fd, request, 4096, 0);
         assert(nbytes != -1);
         request[nbytes] = '\0';
         char response[1024];
@@ -169,17 +181,26 @@ main()
         {
             frame_parser_t parser;
             frame_parser_init(&parser);
-            frame_parser_injest_result_t injest_result = FRAME_PARSER_INJEST_RESULT_PENDING;
+            frame_parser_injest_result_t injest_result =
+                FRAME_PARSER_INJEST_RESULT_PENDING;
 
             printf("--------REMINDING DATA LOOP START\n");
 
             bool keep_going = true;
-            while (keep_going && remining_data_size != 0) {
-                // Injest data that was possibly left from multiple frames in one TCP recv
+            while (keep_going && remining_data_size != 0)
+            {
+                // Injest data that was possibly left from multiple frames in one TCP
+                // recv
                 size_t initial_remining_data_size = remining_data_size;
-                injest_result = frame_parser_injest(&parser, remining_data, remining_data_size, &remining_data_size);
-                printf("injest_result %d, initial_remining_data_size %zu, remining_data_size %zu\n", injest_result, initial_remining_data_size, remining_data_size);
-                keep_going = handle_injest_result(injest_result, client_fd, &parser.frame);
+                injest_result = frame_parser_injest(
+                    &parser, remining_data, remining_data_size, &remining_data_size);
+                printf("injest_result %d, initial_remining_data_size %zu, "
+                       "remining_data_size %zu\n",
+                       injest_result,
+                       initial_remining_data_size,
+                       remining_data_size);
+                keep_going =
+                    handle_injest_result(injest_result, client_fd, &parser.frame);
                 printf("here2 keep_going %d\n", keep_going);
                 if (injest_result == FRAME_PARSER_INJEST_RESULT_DONE)
                     frame_parser_init(&parser);
@@ -195,8 +216,8 @@ main()
             printf("--------REMINDING DATA LOOP END\n");
 
             uint8_t data[4096];
-            int      data_size;
-            bool     recv_error = false;
+            int data_size;
+            bool recv_error = false;
             injest_result = FRAME_PARSER_INJEST_RESULT_PENDING;
             while (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
             {
@@ -213,9 +234,13 @@ main()
                     recv_error = true;
                     break;
                 }
-                injest_result = frame_parser_injest(&parser, data, data_size, &remining_data_size);
-                if (remining_data_size > 0) {
-                    memcpy(remining_data, data + data_size - remining_data_size, remining_data_size);
+                injest_result = frame_parser_injest(
+                    &parser, data, data_size, &remining_data_size);
+                if (remining_data_size > 0)
+                {
+                    memcpy(remining_data,
+                           data + data_size - remining_data_size,
+                           remining_data_size);
                 }
             }
 
@@ -225,7 +250,8 @@ main()
                 break;
             }
             // frame_print(&f);
-            keep_going = handle_injest_result(injest_result, client_fd, &parser.frame);
+            keep_going =
+                handle_injest_result(injest_result, client_fd, &parser.frame);
             printf("here keep_going %d\n", keep_going);
             if (!keep_going)
                 break;
@@ -240,7 +266,7 @@ main()
             .payload.close.status_code = 1000,
         };
         uint8_t send_buffer[512];
-        size_t  send_buffer_size;
+        size_t send_buffer_size;
         frame_dump(&closing_frame, send_buffer, &send_buffer_size);
         send(client_fd, send_buffer, send_buffer_size, 0);
 

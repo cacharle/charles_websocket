@@ -9,8 +9,8 @@
 void
 websocket_accept(const char *client_key, char *out)
 {
-    const char   *magic_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    char          combined[256];
+    const char *magic_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    char combined[256];
     unsigned char sha1[SHA_DIGEST_LENGTH];
     snprintf(combined, sizeof(combined), "%s%s", client_key, magic_guid);
     SHA1((unsigned char *)combined, strlen(combined), sha1);

@@ -15,9 +15,9 @@ ColumnLimit: 85
 DerivePointerAlignment: false
 PointerAlignment: Right
 
-AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveDeclarations: None
 AlignConsecutiveAssignments: None
-AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveBitFields: None
 # AlignArrayOfStructures: Left  # clang-format 13 only
 AlignEscapedNewlines: Left
 AlignTrailingComments: true
