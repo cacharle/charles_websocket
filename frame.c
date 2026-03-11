@@ -257,6 +257,7 @@ frame_print(const frame_t *frame)
     switch (frame->opcode)
     {
     case FRAME_OPCODE_BINARY:
+    case FRAME_OPCODE_CONTINUATION:
         printf("[");
         if (frame->payload_length < 100)
         {
@@ -305,6 +306,9 @@ frame_destroy(frame_t *frame)
     switch (frame->opcode)
     {
     case FRAME_OPCODE_BINARY:
+    case FRAME_OPCODE_PING:
+    case FRAME_OPCODE_PONG:
+    case FRAME_OPCODE_CONTINUATION:
         free(frame->payload.binary);
         break;
     case FRAME_OPCODE_TEXT:

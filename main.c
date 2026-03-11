@@ -171,12 +171,14 @@ main()
             frame_parser_init(&parser);
             frame_parser_injest_result_t injest_result = FRAME_PARSER_INJEST_RESULT_PENDING;
 
+            printf("--------REMINDING DATA LOOP START\n");
+
             bool keep_going = true;
             while (keep_going && remining_data_size != 0) {
                 // Injest data that was possibly left from multiple frames in one TCP recv
                 size_t initial_remining_data_size = remining_data_size;
                 injest_result = frame_parser_injest(&parser, remining_data, remining_data_size, &remining_data_size);
-                printf("injest_result %d\n", injest_result);
+                printf("injest_result %d, initial_remining_data_size %zu, remining_data_size %zu\n", injest_result, initial_remining_data_size, remining_data_size);
                 keep_going = handle_injest_result(injest_result, client_fd, &parser.frame);
                 printf("here2 keep_going %d\n", keep_going);
                 if (injest_result == FRAME_PARSER_INJEST_RESULT_DONE)
@@ -190,9 +192,12 @@ main()
             if (!keep_going)
                 break;
 
+            printf("--------REMINDING DATA LOOP END\n");
+
             uint8_t data[4096];
             int      data_size;
             bool     recv_error = false;
+            injest_result = FRAME_PARSER_INJEST_RESULT_PENDING;
             while (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
             {
                 data_size = recv(client_fd, data, sizeof(data), 0);
