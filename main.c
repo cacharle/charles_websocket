@@ -37,6 +37,7 @@ print_bytes(unsigned char *bytes, size_t len)
 static frame_opcode_t current_fragmented_opcode = -1;
 static size_t current_fragmented_payload_length = 0;
 static void *current_fragmented_payload = NULL;
+static bool current_fragmented_active = false;
 
 bool
 handle_injest_result(frame_parser_injest_result_t injest_result,
@@ -65,10 +66,14 @@ handle_injest_result(frame_parser_injest_result_t injest_result,
         send(client_fd, send_buffer, send_buffer_size, 0);
         return true;
     case FRAME_OPCODE_TEXT:
-    case FRAME_OPCODE_BINARY:
-    {
-        if (current_fragmented_payload != NULL)
+    case FRAME_OPCODE_BINARY: {
+        if (current_fragmented_active) {
+            current_fragmented_opcode = -1;
+            current_fragmented_payload = NULL;
+            current_fragmented_active = false;
+            current_fragmented_payload_length = 0;
             return false;
+        }
         if (frame->final)
         {
             printf("Received text|binary frame, sending same frame back\n");
@@ -98,8 +103,10 @@ handle_injest_result(frame_parser_injest_result_t injest_result,
         printf("FRAME_OPCODE_PONG ignored\n");
         return true;
     case FRAME_OPCODE_CONTINUATION:
-        if (current_fragmented_payload == NULL)
+        if (!current_fragmented_active) {
+            printf("if (current_fragmented_payload == NULL)\n");
             return false;
+        }
         printf("FRAME_OPCODE_CONTINUATION handled\n");
         current_fragmented_payload =
             realloc(current_fragmented_payload,
@@ -174,6 +181,7 @@ main()
         current_fragmented_opcode = -1;
         current_fragmented_payload_length = 0;
         current_fragmented_payload = NULL;
+        current_fragmented_active = false;
 
         size_t remining_data_size = 0;
         uint8_t remining_data[4096];
