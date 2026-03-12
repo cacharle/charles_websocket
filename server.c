@@ -155,6 +155,7 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
         size = remining_size;
         if (FRAME_PARSER_INJEST_RESULT_IS_ERROR(injest_result))
         {
+            frame_destroy(&client->parser.frame);
             int close_code = 1000;
             switch (injest_result)
             {
@@ -200,6 +201,7 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
             frame_parser_init(&client->parser);
             if (to_remove)
             {
+                free(client->defragmentation_state.payload);
                 return to_remove;
             }
         }

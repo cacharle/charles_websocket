@@ -142,10 +142,6 @@ frame_parser_injest(frame_parser_t *parser,
         }
     }
 
-    printf("here injested %zu size %zu payload_length %zu\n",
-           parser->injested_payload_length,
-           size,
-           parser->frame.payload_length);
     if (size > parser->frame.payload_length)
     {
         size_t size_to_consume =
@@ -153,10 +149,6 @@ frame_parser_injest(frame_parser_t *parser,
         *remining_data_size = size - size_to_consume;
         size = size_to_consume;
     }
-    printf("here2 injested %zu size %zu payload_length %zu\n\n",
-           parser->injested_payload_length,
-           size,
-           parser->frame.payload_length);
 
     // Unmask data payload
     for (size_t i = 0; i < size; i++)
