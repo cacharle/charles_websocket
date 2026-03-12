@@ -39,5 +39,6 @@ bool
 client_injest(client_t *client, uint8_t *buffer, size_t size);
 void
 client_close(client_t *client, int close_code);
+bool client_handle_frame(client_t *client, frame_t *frame);
 
 #endif  // CHARLES_WEBSOCKET_SERVER_H

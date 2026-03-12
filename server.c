@@ -4,6 +4,7 @@
 #include "handshake.h"
 #include "utils.h"
 #include <errno.h>
+#include <stdlib.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <signal.h>
@@ -62,9 +63,7 @@ server_start(server_t *server)
                 break;
             }
             else
-            {
                 die("ppoll");
-            }
         }
 
         // Accept a new client and add it to the client list
@@ -152,21 +151,119 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
             client_close(client, 1000);
             return true;
         }
+        else if (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
+        {
+            return false;
+        }
+        else if (injest_result == FRAME_PARSER_INJEST_RESULT_DONE)
+        {
+            bool to_remove = client_handle_frame(client, &client->parser.frame);
+            frame_destroy(&client->parser.frame);
+            frame_parser_init(&client->parser);
+            return to_remove;
+        }
     }
 
     return false;
 }
 
+char *close_status_reason[] = {
+    [1000] = "Normal closure",
+    [1001] = "Going away",
+    [1002] = "Protocol error",
+    [1003] = "Unsupported data",
+    [1008] = "Policy violation",
+    [1011] = "Internal error",
+};
+
 void
 client_close(client_t *client, int close_code)
 {
+    char *close_reason = close_status_reason[close_code];
+    size_t payload_length = 2 + strlen(close_reason);
     frame_t close_frame = {
         .final = true,
         .opcode = FRAME_OPCODE_CLOSE,
-        .payload_length = 2,
+        .payload_length = payload_length,
         .payload.close.status_code = close_code,
-        .payload.close.reason = NULL,
+        .payload.close.reason = (uint8_t*)close_reason,
     };
     frame_send(&close_frame, client->fd);
     close(client->fd);
+}
+
+bool client_handle_frame(client_t *client, frame_t *frame)
+{
+    switch (frame->opcode)
+    {
+    case FRAME_OPCODE_CLOSE:
+        client_close(client, 1000);
+        return true;
+    case FRAME_OPCODE_PING:
+    {
+        frame_t ping_frame = *frame;
+        ping_frame.opcode = FRAME_OPCODE_PONG;
+        frame_send(&ping_frame, client->fd);
+        return false;
+    }
+    case FRAME_OPCODE_PONG:
+        return false;
+    case FRAME_OPCODE_TEXT:
+    case FRAME_OPCODE_BINARY:
+    {
+        if (client->defragmentation_state.active)
+            return true;
+        if (frame->final)
+        {
+            if (frame->opcode == FRAME_OPCODE_TEXT &&
+                !is_valid_utf8(frame->payload.text, frame->payload_length))
+                return true;
+            frame_send(frame, client->fd);
+        }
+        else
+        {
+            client->defragmentation_state.opcode = frame->opcode;
+            client->defragmentation_state.payload_length =
+                frame->payload_length;
+            client->defragmentation_state.payload =
+                xmalloc(frame->payload_length);
+            memcpy(client->defragmentation_state.payload,
+                   frame->payload.binary,
+                   frame->payload_length);
+        }
+        return false;
+    }
+    case FRAME_OPCODE_CONTINUATION:
+        if (!client->defragmentation_state.active)
+            return true;
+        client->defragmentation_state.payload =
+            xrealloc(client->defragmentation_state.payload,
+                     client->defragmentation_state.payload_length +
+                         frame->payload_length);
+        memcpy(client->defragmentation_state.payload +
+                   client->defragmentation_state.payload_length,
+               frame->payload.binary,
+               frame->payload_length);
+        client->defragmentation_state.payload_length +=
+            frame->payload_length;
+        if (frame->final)
+        {
+            if (client->defragmentation_state.opcode == FRAME_OPCODE_TEXT &&
+                !is_valid_utf8(client->defragmentation_state.payload, client->defragmentation_state.payload_length))
+                return true;
+            frame_t sent_frame = {
+                .final = true,
+                .opcode = client->defragmentation_state.opcode,
+                .payload_length = client->defragmentation_state.payload_length,
+                .payload.binary = client->defragmentation_state.payload,
+            };
+            frame_send(&sent_frame, client->fd);
+            free(client->defragmentation_state.payload);
+            client->defragmentation_state.active = false;
+            client->defragmentation_state.payload = NULL;
+            client->defragmentation_state.payload_length = 0;
+        }
+        return false;
+    }
+    abort();
 }

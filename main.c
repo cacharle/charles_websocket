@@ -78,7 +78,7 @@ handle_injest_result(frame_parser_injest_result_t injest_result,
         {
             printf("Received text|binary frame, sending same frame back\n");
             if (frame->opcode == FRAME_OPCODE_TEXT &&
-                !is_valid_utf8((unsigned char *)frame->payload.text,
+                !is_valid_utf8(frame->payload.text,
                                frame->payload_length))
                 return false;
             uint8_t *send_buffer = malloc(frame->payload_length + 16);
@@ -120,7 +120,7 @@ handle_injest_result(frame_parser_injest_result_t injest_result,
             printf("FRAME_OPCODE_CONTINUATION final\n");
 
             if (current_fragmented_opcode == FRAME_OPCODE_TEXT &&
-                !is_valid_utf8((unsigned char *)current_fragmented_payload,
+                !is_valid_utf8(current_fragmented_payload,
                                current_fragmented_payload_length))
                 return false;
             uint8_t *send_buffer = malloc(current_fragmented_payload_length + 16);

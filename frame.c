@@ -13,13 +13,13 @@ struct frame_header_layout
 {
     // First byte in network order (logical protocol order is
     // final->reserverd->opcode)
-    uint8_t opcode : 4;
-    uint8_t reserved : 3;
+    uint8_t opcode      : 4;
+    uint8_t reserved    : 3;
     uint8_t final_frame : 1;
     // Second byte in network order (logical protocol order is
     // mask->payload_length_start)
     uint8_t payload_length_start : 7;
-    uint8_t mask : 1;
+    uint8_t mask                 : 1;
 };
 
 void
@@ -31,20 +31,17 @@ frame_parser_init(frame_parser_t *parser)
 }
 
 frame_parser_injest_result_t
-frame_parser_injest(frame_parser_t *parser,
-                    uint8_t *data,
-                    size_t size,
-                    size_t *remining_data_size)
+frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *remining_data_size)
 {
     *remining_data_size = 0;
 
     if (!parser->header_parsed)
     {
-        size_t copied_size = MIN(
-            size, sizeof(parser->header_buffer) - parser->header_buffer_position);
-        memcpy(parser->header_buffer + parser->header_buffer_position,
-               data,
-               copied_size);
+        size_t copied_size = MIN(size, sizeof(parser->header_buffer) - parser->header_buffer_position);
+        memcpy(
+            parser->header_buffer + parser->header_buffer_position,
+            data,
+            copied_size);
         size_t initial_header_buffer_position = parser->header_buffer_position;
         parser->header_buffer_position += copied_size;
         if (parser->header_buffer_position < sizeof(struct frame_header_layout))
@@ -78,38 +75,32 @@ frame_parser_injest(frame_parser_t *parser,
         if (!layout->mask)
             return FRAME_PARSER_INJEST_RESULT_ERROR;
         size_t size_of_payload_length = 0;
-        uint8_t *header_buffer_ptr =
-            parser->header_buffer + sizeof(struct frame_header_layout);
+        uint8_t *header_buffer_ptr = parser->header_buffer + sizeof(struct frame_header_layout);
         // Extract the payload size
         if (layout->payload_length_start < 126)
             parser->frame.payload_length = layout->payload_length_start;
         else if (layout->payload_length_start == 126)
         {
             size_of_payload_length = sizeof(uint16_t);
-            if (parser->header_buffer_position <
-                sizeof(struct frame_header_layout) + size_of_payload_length)
+            if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length)
                 return FRAME_PARSER_INJEST_RESULT_PENDING;
             parser->frame.payload_length = ntohs(*(uint16_t *)header_buffer_ptr);
         }
         else if (layout->payload_length_start == 127)
         {
             size_of_payload_length = sizeof(uint64_t);
-            if (parser->header_buffer_position <
-                sizeof(struct frame_header_layout) + size_of_payload_length)
+            if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length)
                 return FRAME_PARSER_INJEST_RESULT_PENDING;
             parser->frame.payload_length = be64toh(*(uint64_t *)header_buffer_ptr);
         }
         header_buffer_ptr += size_of_payload_length;
 
-        if (parser->header_buffer_position < sizeof(struct frame_header_layout) +
-                                                 size_of_payload_length +
-                                                 sizeof(uint32_t))
+        if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length + sizeof(uint32_t))
             return FRAME_PARSER_INJEST_RESULT_PENDING;
         parser->masking_key = *(uint32_t *)header_buffer_ptr;
         parser->header_parsed = true;
 
-        size_t final_size = sizeof(struct frame_header_layout) +
-                            size_of_payload_length + sizeof(uint32_t);
+        size_t final_size = sizeof(struct frame_header_layout) + size_of_payload_length + sizeof(uint32_t);
         size_t used_size = final_size - initial_header_buffer_position;
         data += used_size;
         size -= used_size;
@@ -138,40 +129,29 @@ frame_parser_injest(frame_parser_t *parser,
         printf("Parsed header: %zu size: %zu\n", parser->frame.payload_length, size);
     }
 
-    if (size > parser->frame.payload_length)
-    {
+    if (size > parser->frame.payload_length) {
         *remining_data_size = size - parser->frame.payload_length;
         size = parser->frame.payload_length;
-        printf("Here setting remining_data_size %zu, size %zu\n",
-               *remining_data_size,
-               size);
+        printf("Here setting remining_data_size %zu, size %zu\n", *remining_data_size, size);
     }
 
     // Unmask data payload
-    for (size_t i = 0; i < size; i++)
-    {
+    for (size_t i = 0; i < size; i++) {
         size_t offset = i + parser->injested_payload_length;
         data[i] ^= ((uint8_t *)&parser->masking_key)[offset % 4];
     }
 
-    printf("Injesting data for %zu of %zu -> %zu\n",
-           parser->frame.payload_length,
-           parser->injested_payload_length,
-           size);
+    printf("Injesting data for %zu of %zu -> %zu\n", parser->frame.payload_length, parser->injested_payload_length, size);
     switch (parser->frame.opcode)
     {
     case FRAME_OPCODE_BINARY:
     case FRAME_OPCODE_PING:
     case FRAME_OPCODE_PONG:
     case FRAME_OPCODE_CONTINUATION:
-        memcpy(parser->frame.payload.binary + parser->injested_payload_length,
-               data,
-               size);
+        memcpy(parser->frame.payload.binary + parser->injested_payload_length, data, size);
         break;
     case FRAME_OPCODE_TEXT:
-        memcpy(parser->frame.payload.text + parser->injested_payload_length,
-               data,
-               size);
+        memcpy(parser->frame.payload.text + parser->injested_payload_length, data, size);
         if (parser->injested_payload_length + size == parser->frame.payload_length)
             parser->frame.payload.text[parser->frame.payload_length] = '\0';
         break;
@@ -193,8 +173,12 @@ frame_parser_injest(frame_parser_t *parser,
     parser->injested_payload_length += size;
     if (parser->injested_payload_length > parser->frame.payload_length)
         return FRAME_PARSER_INJEST_RESULT_ERROR;
-    if (parser->injested_payload_length == parser->frame.payload_length)
+    if (parser->injested_payload_length == parser->frame.payload_length) {
+        // if (parser->frame.opcode == FRAME_OPCODE_TEXT &&
+        //    !is_valid_utf8_in_frame(parser->frame.payload.text, parser->frame.payload_length))
+        //     return FRAME_PARSER_INJEST_RESULT_ERROR;
         return FRAME_PARSER_INJEST_RESULT_DONE;
+    }
     else
         return FRAME_PARSER_INJEST_RESULT_PENDING;
 }
@@ -252,21 +236,14 @@ frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
 void
 frame_send(frame_t *frame, int fd)
 {
-    uint8_t *send_buffer = xmalloc(frame->payload_length + 16);
+    void *send_buffer = xmalloc(frame->payload_length + 16);
     size_t send_buffer_size;
     frame_dump(frame, send_buffer, &send_buffer_size);
-    send(fd, send_buffer, send_buffer_size, 0);
+    int ret = send(fd, send_buffer, send_buffer_size, 0);
     free(send_buffer);
+    if (ret < 0)
+        die("Failed to send");
 }
-
-char *opcode_close_status_string[] = {
-    [1000] = "Normal closure",
-    [1001] = "Going away",
-    [1002] = "Protocol error",
-    [1003] = "Unsupported data",
-    [1008] = "Policy violation",
-    [1011] = "Internal error",
-};
 
 char *opcode_to_string[] = {
     [FRAME_OPCODE_CONTINUATION] = "continuation",
@@ -303,18 +280,12 @@ frame_print(const frame_t *frame)
         {
             printf("\"%s\"", frame->payload.text);
         }
-        else
-        {
+        else {
             char x = frame->payload.text[0];
             int count = 0;
-            for (size_t i = 0; i < frame->payload_length; i++)
-            {
-                if (frame->payload.text[i] != x)
-                {
-                    printf("payload at %zu, different: %x vs %x\n",
-                           i,
-                           x,
-                           frame->payload.text[i]);
+            for (size_t i = 0; i < frame->payload_length; i++) {
+                if (frame->payload.text[i] != x) {
+                    printf("payload at %zu, different: %x vs %x\n", i, x, frame->payload.text[i]);
                     count++;
                     break;
                 }

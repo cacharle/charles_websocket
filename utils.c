@@ -16,11 +16,21 @@ xmalloc(size_t size)
     return ret;
 }
 
+void *
+xrealloc(void *ptr, size_t size)
+{
+    void *ret = realloc(ptr, size);
+    if (ret == NULL)
+        die("Unable to realloc");
+    return ret;
+}
+
 // LLM generated
 bool
-is_valid_utf8(const unsigned char *s, size_t len)
+is_valid_utf8(const char *s_origin, size_t len)
 {
     size_t i = 0;
+    const unsigned char *s = (const unsigned char *)s_origin;
 
     while (i < len)
     {
