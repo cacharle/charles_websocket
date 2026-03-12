@@ -19,6 +19,8 @@ xmalloc(size_t size)
 void *
 xrealloc(void *ptr, size_t size)
 {
+    if (size == 0)
+        return NULL;
     void *ret = realloc(ptr, size);
     if (ret == NULL)
         die("Unable to realloc");
@@ -110,4 +112,5 @@ die(const char *format, ...)
     vfprintf(stderr, format, ap);
     fprintf(stderr, ": %s\n", strerror(errno));
     va_end(ap);
+    exit(EXIT_FAILURE);
 }

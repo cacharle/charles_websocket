@@ -88,6 +88,7 @@ server_start(server_t *server)
                 .defragmentation_state.payload_length = 0;
             frame_parser_init(&server->clients[server->clients_count].parser);
             server->clients_count++;
+            continue;
         }
 
         // Check if there is any data to receive from active clients
@@ -152,9 +153,21 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
             frame_parser_injest(&client->parser, buffer, size, &remining_size);
         buffer += size - remining_size;
         size = remining_size;
-        if (injest_result == FRAME_PARSER_INJEST_RESULT_ERROR)
+        if (FRAME_PARSER_INJEST_RESULT_IS_ERROR(injest_result))
         {
-            client_close(client, 1000);
+            int close_code = 1000;
+            switch(injest_result) {
+            case FRAME_PARSER_INJEST_RESULT_ERROR: close_code = 1000; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL: close_code = 1002; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_UNSUPPORTED_DATA: close_code = 1003; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD: close_code = 1007; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_POLICY_VIOLATION: close_code = 1008; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_TOO_BIG: close_code = 1009; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_EXTENSION_NEEDED: close_code = 1010; break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL: close_code = 1011; break;
+            default: abort();
+            }
+            client_close(client, close_code);
             return true;
         }
         else if (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
@@ -180,8 +193,15 @@ char *close_status_reason[] = {
     [1001] = "Going away",
     [1002] = "Protocol error",
     [1003] = "Unsupported data",
+    // 1004 is reserved and should not be used
+    // 1005 is reserved and should not be used
+    // 1006 is reserved and should not be used
+    [1007] = "Invalid payload",
     [1008] = "Policy violation",
+    [1009] = "Too big",
+    [1010] = "Extension needed",
     [1011] = "Internal error",
+    // 1015 is reserved and should not be used
 };
 
 void
@@ -189,6 +209,7 @@ client_close(client_t *client, int close_code)
 {
     if (client->closed)
         return;
+    client->closed = true;
     char *close_reason = close_status_reason[close_code];
     size_t payload_length = 2 + strlen(close_reason);
     frame_t close_frame = {
@@ -196,7 +217,7 @@ client_close(client_t *client, int close_code)
         .opcode = FRAME_OPCODE_CLOSE,
         .payload_length = payload_length,
         .payload.close.status_code = close_code,
-        .payload.close.reason = (uint8_t*)close_reason,
+        .payload.close.reason = close_reason,
     };
     frame_send(&close_frame, client->fd);
     close(client->fd);

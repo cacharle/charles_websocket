@@ -28,7 +28,11 @@ frame_parser_init(frame_parser_t *parser)
     parser->header_parsed = false;
     parser->injested_payload_length = 0;
     parser->header_buffer_position = 0;
+
 }
+
+static uint16_t valid_close_codes[] = {1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011};
+constexpr size_t valid_close_codes_length = sizeof(valid_close_codes) / sizeof(valid_close_codes[0]);
 
 frame_parser_injest_result_t
 frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *remining_data_size)
@@ -57,20 +61,20 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
             parser->frame.opcode != FRAME_OPCODE_CLOSE &&
             parser->frame.opcode != FRAME_OPCODE_PING &&
             parser->frame.opcode != FRAME_OPCODE_PONG)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
+            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
         if ((parser->frame.opcode == FRAME_OPCODE_CLOSE ||
              parser->frame.opcode == FRAME_OPCODE_PING ||
              parser->frame.opcode == FRAME_OPCODE_PONG) &&
             layout->payload_length_start > 125)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
+            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
 
         if (!parser->frame.final &&
             parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
             parser->frame.opcode != FRAME_OPCODE_TEXT &&
             parser->frame.opcode != FRAME_OPCODE_BINARY)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
+            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
         if (layout->reserved != 0)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
+            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
         // Client to server MUST be masked
         if (!layout->mask)
             return FRAME_PARSER_INJEST_RESULT_ERROR;
@@ -126,14 +130,16 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
                 parser->frame.payload.close.reason = NULL;
             break;
         }
-        printf("Parsed header: %zu size: %zu\n", parser->frame.payload_length, size);
     }
 
+    printf("here injested %zu size %zu payload_length %zu\n", parser->injested_payload_length, size, parser->frame.payload_length);
     if (size > parser->frame.payload_length) {
-        *remining_data_size = size - parser->frame.payload_length;
-        size = parser->frame.payload_length;
-        printf("Here setting remining_data_size %zu, size %zu\n", *remining_data_size, size);
+        size_t size_to_consume = parser->frame.payload_length - parser->injested_payload_length;
+        *remining_data_size = size - size_to_consume;
+        size = size_to_consume;
     }
+    printf("here2 injested %zu size %zu payload_length %zu\n\n", parser->injested_payload_length, size, parser->frame.payload_length);
+
 
     // Unmask data payload
     for (size_t i = 0; i < size; i++) {
@@ -141,7 +147,6 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
         data[i] ^= ((uint8_t *)&parser->masking_key)[offset % 4];
     }
 
-    printf("Injesting data for %zu of %zu -> %zu\n", parser->frame.payload_length, parser->injested_payload_length, size);
     switch (parser->frame.opcode)
     {
     case FRAME_OPCODE_BINARY:
@@ -156,15 +161,34 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
             parser->frame.payload.text[parser->frame.payload_length] = '\0';
         break;
     case FRAME_OPCODE_CLOSE:
+        // The code has to be 2 bytes or absent, it makes no sense to get a 1 byte
+        // payload for a close frame
+        if (parser->frame.payload_length == 1)
+            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
         if (parser->injested_payload_length == 0 && size >= 2)
         {
             parser->frame.payload.close.status_code = ntohs(*(uint16_t *)data);
+            bool is_valid = false;
+            for (size_t i = 0; i < valid_close_codes_length; i++)
+                if (valid_close_codes[i] == parser->frame.payload.close.status_code)
+                    is_valid = true;
+            // 3000-3999 are valid reserved for custom use by libraries
+            if (3000 <= parser->frame.payload.close.status_code &&
+                parser->frame.payload.close.status_code <= 3999)
+                is_valid = true;
+            // 4000-4999 are valid reserved for custom use by private code
+            if (4000 <= parser->frame.payload.close.status_code &&
+                parser->frame.payload.close.status_code <= 4999)
+                is_valid = true;
+            if (!is_valid)
+                return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
             data += sizeof(uint16_t);
             size -= sizeof(uint16_t);
             parser->injested_payload_length += 2;
         }
-        if (parser->frame.payload_length > parser->injested_payload_length)
-            memcpy(parser->frame.payload.close.reason, data, size);
+        if (parser->injested_payload_length >= 2 &&
+                parser->frame.payload_length > parser->injested_payload_length)
+            memcpy(parser->frame.payload.close.reason + parser->injested_payload_length - 2, data, size);
         break;
     default:
         break;
@@ -174,9 +198,10 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
     if (parser->injested_payload_length > parser->frame.payload_length)
         return FRAME_PARSER_INJEST_RESULT_ERROR;
     if (parser->injested_payload_length == parser->frame.payload_length) {
-        // if (parser->frame.opcode == FRAME_OPCODE_TEXT &&
-        //    !is_valid_utf8_in_frame(parser->frame.payload.text, parser->frame.payload_length))
-        //     return FRAME_PARSER_INJEST_RESULT_ERROR;
+        if (parser->frame.opcode == FRAME_OPCODE_CLOSE &&
+            parser->frame.payload.close.reason != NULL &&
+           !is_valid_utf8(parser->frame.payload.close.reason, parser->frame.payload_length - 2))
+            return FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD;
         return FRAME_PARSER_INJEST_RESULT_DONE;
     }
     else
@@ -241,7 +266,7 @@ frame_send(frame_t *frame, int fd)
     frame_dump(frame, send_buffer, &send_buffer_size);
     int ret = send(fd, send_buffer, send_buffer_size, 0);
     free(send_buffer);
-    if (ret < 0)
+    if (ret == -1)
         die("Failed to send");
 }
 

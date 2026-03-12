@@ -27,7 +27,7 @@ typedef struct
         struct
         {
             uint16_t status_code;
-            uint8_t *reason;
+            char *reason;
         } close;
     } payload;
 } frame_t;
@@ -47,7 +47,16 @@ typedef enum
     FRAME_PARSER_INJEST_RESULT_DONE,
     FRAME_PARSER_INJEST_RESULT_PENDING,
     FRAME_PARSER_INJEST_RESULT_ERROR,
+    FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL,
+    FRAME_PARSER_INJEST_RESULT_ERROR_UNSUPPORTED_DATA,
+    FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD,
+    FRAME_PARSER_INJEST_RESULT_ERROR_POLICY_VIOLATION,
+    FRAME_PARSER_INJEST_RESULT_ERROR_TOO_BIG,
+    FRAME_PARSER_INJEST_RESULT_ERROR_EXTENSION_NEEDED,
+    FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL,
 } frame_parser_injest_result_t;
+
+#define FRAME_PARSER_INJEST_RESULT_IS_ERROR(e) ((e) >= FRAME_PARSER_INJEST_RESULT_ERROR)
 
 void
 frame_parser_init(frame_parser_t *parser);
