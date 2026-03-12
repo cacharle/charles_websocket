@@ -108,6 +108,6 @@ die(const char *format, ...)
     va_start(ap, format);
     fputs("cws: ", stderr);
     vfprintf(stderr, format, ap);
-    fprintf(stderr, ": %s", strerror(errno));
+    fprintf(stderr, ": %s\n", strerror(errno));
     va_end(ap);
 }

@@ -18,6 +18,7 @@ typedef struct
 
 typedef struct
 {
+    bool closed;
     int fd;
     bool handshake_completed;
     defragmentation_state_t defragmentation_state;

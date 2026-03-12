@@ -26,6 +26,9 @@ server_init(server_t *server, uint16_t port)
         .sin_port = htons(port),
         .sin_addr = {.s_addr = INADDR_ANY},
     };
+    // Allow the port to be reused after program end
+    int opt = 1;
+    setsockopt(server->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     int ret = bind(server->fd, (struct sockaddr *)&addr, sizeof addr);
     if (ret < 0)
         die("Couldn't bind socket");
@@ -37,9 +40,9 @@ server_init(server_t *server, uint16_t port)
 void
 server_start(server_t *server)
 {
-    sigset_t sigint_mask;
-    sigemptyset(&sigint_mask);
-    sigaddset(&sigint_mask, SIGINT);
+    // sigset_t sigint_mask;
+    // sigemptyset(&sigint_mask);
+    // sigaddset(&sigint_mask, SIGINT);
 
     while (true)
     {
@@ -48,13 +51,13 @@ server_start(server_t *server)
         pollfds[0].fd = server->fd;
         pollfds[0].events = POLLIN;
         pollfds[0].revents = 0;
-        for (size_t i = 0; i <= server->clients_count; i++)
+        for (size_t i = 0; i < server->clients_count; i++)
         {
             pollfds[i + 1].fd = server->clients[i].fd;
             pollfds[i + 1].events = POLLIN;
             pollfds[i + 1].revents = 0;
         }
-        int ret = ppoll(pollfds, server->clients_count + 1, NULL, &sigint_mask);
+        int ret = ppoll(pollfds, server->clients_count + 1, NULL, NULL);
         if (ret < 0)
         {
             if (errno == EINTR)
@@ -75,6 +78,7 @@ server_start(server_t *server)
             socklen_t client_addr_len = sizeof client_addr;
             server->clients[server->clients_count].fd = accept(
                 server->fd, (struct sockaddr *)&client_addr, &client_addr_len);
+            server->clients[server->clients_count].closed = false;
             server->clients[server->clients_count].handshake_completed = false;
             server->clients[server->clients_count].defragmentation_state.active =
                 false;
@@ -89,7 +93,7 @@ server_start(server_t *server)
         // Check if there is any data to receive from active clients
         bool to_remove[SERVER_MAX_CLIENTS];
         memset(to_remove, false, SERVER_MAX_CLIENTS);
-        for (size_t i = 0; i <= server->clients_count; i++)
+        for (size_t i = 0; i < server->clients_count; i++)
         {
             if (pollfds[i + 1].revents & POLLIN)
             {
@@ -104,10 +108,11 @@ server_start(server_t *server)
         }
 
         // Remove clients who are closed
-        for (size_t i = 0; i <= server->clients_count; i++)
+        for (size_t i = 0; i < server->clients_count; i++)
         {
-            if (!to_remove[i])
+            if (to_remove[i])
             {
+                client_close(&server->clients[i], 1000);
                 if (server->clients_count > 1)
                     memmove(server->clients + i,
                             server->clients + i + 1,
@@ -118,8 +123,9 @@ server_start(server_t *server)
         }
     }
 
+    printf("Clean exit\n");
     for (size_t i = 0; i <= server->clients_count; i++)
-        close(server->clients[i].fd);
+        client_close(&server->clients[i], 1000);
     close(server->fd);
 }
 
@@ -157,13 +163,15 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
         }
         else if (injest_result == FRAME_PARSER_INJEST_RESULT_DONE)
         {
+            frame_print(&client->parser.frame);
             bool to_remove = client_handle_frame(client, &client->parser.frame);
             frame_destroy(&client->parser.frame);
             frame_parser_init(&client->parser);
-            return to_remove;
+            if (to_remove) {
+                return to_remove;
+            }
         }
     }
-
     return false;
 }
 
@@ -179,6 +187,8 @@ char *close_status_reason[] = {
 void
 client_close(client_t *client, int close_code)
 {
+    if (client->closed)
+        return;
     char *close_reason = close_status_reason[close_code];
     size_t payload_length = 2 + strlen(close_reason);
     frame_t close_frame = {
@@ -222,6 +232,7 @@ bool client_handle_frame(client_t *client, frame_t *frame)
         }
         else
         {
+            client->defragmentation_state.active = true;
             client->defragmentation_state.opcode = frame->opcode;
             client->defragmentation_state.payload_length =
                 frame->payload_length;
