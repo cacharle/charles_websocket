@@ -4,12 +4,12 @@
 #include "handshake.h"
 #include "utils.h"
 #include <errno.h>
-#include <stdlib.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -156,16 +156,34 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
         if (FRAME_PARSER_INJEST_RESULT_IS_ERROR(injest_result))
         {
             int close_code = 1000;
-            switch(injest_result) {
-            case FRAME_PARSER_INJEST_RESULT_ERROR: close_code = 1000; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL: close_code = 1002; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_UNSUPPORTED_DATA: close_code = 1003; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD: close_code = 1007; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_POLICY_VIOLATION: close_code = 1008; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_TOO_BIG: close_code = 1009; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_EXTENSION_NEEDED: close_code = 1010; break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL: close_code = 1011; break;
-            default: abort();
+            switch (injest_result)
+            {
+            case FRAME_PARSER_INJEST_RESULT_ERROR:
+                close_code = 1000;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL:
+                close_code = 1002;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_UNSUPPORTED_DATA:
+                close_code = 1003;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD:
+                close_code = 1007;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_POLICY_VIOLATION:
+                close_code = 1008;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_TOO_BIG:
+                close_code = 1009;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_EXTENSION_NEEDED:
+                close_code = 1010;
+                break;
+            case FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL:
+                close_code = 1011;
+                break;
+            default:
+                abort();
             }
             client_close(client, close_code);
             return true;
@@ -180,7 +198,8 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
             bool to_remove = client_handle_frame(client, &client->parser.frame);
             frame_destroy(&client->parser.frame);
             frame_parser_init(&client->parser);
-            if (to_remove) {
+            if (to_remove)
+            {
                 return to_remove;
             }
         }
@@ -223,7 +242,8 @@ client_close(client_t *client, int close_code)
     close(client->fd);
 }
 
-bool client_handle_frame(client_t *client, frame_t *frame)
+bool
+client_handle_frame(client_t *client, frame_t *frame)
 {
     switch (frame->opcode)
     {
@@ -255,10 +275,8 @@ bool client_handle_frame(client_t *client, frame_t *frame)
         {
             client->defragmentation_state.active = true;
             client->defragmentation_state.opcode = frame->opcode;
-            client->defragmentation_state.payload_length =
-                frame->payload_length;
-            client->defragmentation_state.payload =
-                xmalloc(frame->payload_length);
+            client->defragmentation_state.payload_length = frame->payload_length;
+            client->defragmentation_state.payload = xmalloc(frame->payload_length);
             memcpy(client->defragmentation_state.payload,
                    frame->payload.binary,
                    frame->payload_length);
@@ -268,20 +286,19 @@ bool client_handle_frame(client_t *client, frame_t *frame)
     case FRAME_OPCODE_CONTINUATION:
         if (!client->defragmentation_state.active)
             return true;
-        client->defragmentation_state.payload =
-            xrealloc(client->defragmentation_state.payload,
-                     client->defragmentation_state.payload_length +
-                         frame->payload_length);
+        client->defragmentation_state.payload = xrealloc(
+            client->defragmentation_state.payload,
+            client->defragmentation_state.payload_length + frame->payload_length);
         memcpy(client->defragmentation_state.payload +
                    client->defragmentation_state.payload_length,
                frame->payload.binary,
                frame->payload_length);
-        client->defragmentation_state.payload_length +=
-            frame->payload_length;
+        client->defragmentation_state.payload_length += frame->payload_length;
         if (frame->final)
         {
             if (client->defragmentation_state.opcode == FRAME_OPCODE_TEXT &&
-                !is_valid_utf8(client->defragmentation_state.payload, client->defragmentation_state.payload_length))
+                !is_valid_utf8(client->defragmentation_state.payload,
+                               client->defragmentation_state.payload_length))
                 return true;
             frame_t sent_frame = {
                 .final = true,

@@ -13,13 +13,13 @@ struct frame_header_layout
 {
     // First byte in network order (logical protocol order is
     // final->reserverd->opcode)
-    uint8_t opcode      : 4;
-    uint8_t reserved    : 3;
+    uint8_t opcode : 4;
+    uint8_t reserved : 3;
     uint8_t final_frame : 1;
     // Second byte in network order (logical protocol order is
     // mask->payload_length_start)
     uint8_t payload_length_start : 7;
-    uint8_t mask                 : 1;
+    uint8_t mask : 1;
 };
 
 void
@@ -28,24 +28,28 @@ frame_parser_init(frame_parser_t *parser)
     parser->header_parsed = false;
     parser->injested_payload_length = 0;
     parser->header_buffer_position = 0;
-
 }
 
-static uint16_t valid_close_codes[] = {1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011};
-constexpr size_t valid_close_codes_length = sizeof(valid_close_codes) / sizeof(valid_close_codes[0]);
+static uint16_t valid_close_codes[] = {
+    1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011};
+constexpr size_t valid_close_codes_length =
+    sizeof(valid_close_codes) / sizeof(valid_close_codes[0]);
 
 frame_parser_injest_result_t
-frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *remining_data_size)
+frame_parser_injest(frame_parser_t *parser,
+                    uint8_t *data,
+                    size_t size,
+                    size_t *remining_data_size)
 {
     *remining_data_size = 0;
 
     if (!parser->header_parsed)
     {
-        size_t copied_size = MIN(size, sizeof(parser->header_buffer) - parser->header_buffer_position);
-        memcpy(
-            parser->header_buffer + parser->header_buffer_position,
-            data,
-            copied_size);
+        size_t copied_size = MIN(
+            size, sizeof(parser->header_buffer) - parser->header_buffer_position);
+        memcpy(parser->header_buffer + parser->header_buffer_position,
+               data,
+               copied_size);
         size_t initial_header_buffer_position = parser->header_buffer_position;
         parser->header_buffer_position += copied_size;
         if (parser->header_buffer_position < sizeof(struct frame_header_layout))
@@ -79,32 +83,38 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
         if (!layout->mask)
             return FRAME_PARSER_INJEST_RESULT_ERROR;
         size_t size_of_payload_length = 0;
-        uint8_t *header_buffer_ptr = parser->header_buffer + sizeof(struct frame_header_layout);
+        uint8_t *header_buffer_ptr =
+            parser->header_buffer + sizeof(struct frame_header_layout);
         // Extract the payload size
         if (layout->payload_length_start < 126)
             parser->frame.payload_length = layout->payload_length_start;
         else if (layout->payload_length_start == 126)
         {
             size_of_payload_length = sizeof(uint16_t);
-            if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length)
+            if (parser->header_buffer_position <
+                sizeof(struct frame_header_layout) + size_of_payload_length)
                 return FRAME_PARSER_INJEST_RESULT_PENDING;
             parser->frame.payload_length = ntohs(*(uint16_t *)header_buffer_ptr);
         }
         else if (layout->payload_length_start == 127)
         {
             size_of_payload_length = sizeof(uint64_t);
-            if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length)
+            if (parser->header_buffer_position <
+                sizeof(struct frame_header_layout) + size_of_payload_length)
                 return FRAME_PARSER_INJEST_RESULT_PENDING;
             parser->frame.payload_length = be64toh(*(uint64_t *)header_buffer_ptr);
         }
         header_buffer_ptr += size_of_payload_length;
 
-        if (parser->header_buffer_position < sizeof(struct frame_header_layout) + size_of_payload_length + sizeof(uint32_t))
+        if (parser->header_buffer_position < sizeof(struct frame_header_layout) +
+                                                 size_of_payload_length +
+                                                 sizeof(uint32_t))
             return FRAME_PARSER_INJEST_RESULT_PENDING;
         parser->masking_key = *(uint32_t *)header_buffer_ptr;
         parser->header_parsed = true;
 
-        size_t final_size = sizeof(struct frame_header_layout) + size_of_payload_length + sizeof(uint32_t);
+        size_t final_size = sizeof(struct frame_header_layout) +
+                            size_of_payload_length + sizeof(uint32_t);
         size_t used_size = final_size - initial_header_buffer_position;
         data += used_size;
         size -= used_size;
@@ -132,17 +142,25 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
         }
     }
 
-    printf("here injested %zu size %zu payload_length %zu\n", parser->injested_payload_length, size, parser->frame.payload_length);
-    if (size > parser->frame.payload_length) {
-        size_t size_to_consume = parser->frame.payload_length - parser->injested_payload_length;
+    printf("here injested %zu size %zu payload_length %zu\n",
+           parser->injested_payload_length,
+           size,
+           parser->frame.payload_length);
+    if (size > parser->frame.payload_length)
+    {
+        size_t size_to_consume =
+            parser->frame.payload_length - parser->injested_payload_length;
         *remining_data_size = size - size_to_consume;
         size = size_to_consume;
     }
-    printf("here2 injested %zu size %zu payload_length %zu\n\n", parser->injested_payload_length, size, parser->frame.payload_length);
-
+    printf("here2 injested %zu size %zu payload_length %zu\n\n",
+           parser->injested_payload_length,
+           size,
+           parser->frame.payload_length);
 
     // Unmask data payload
-    for (size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++)
+    {
         size_t offset = i + parser->injested_payload_length;
         data[i] ^= ((uint8_t *)&parser->masking_key)[offset % 4];
     }
@@ -153,10 +171,14 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
     case FRAME_OPCODE_PING:
     case FRAME_OPCODE_PONG:
     case FRAME_OPCODE_CONTINUATION:
-        memcpy(parser->frame.payload.binary + parser->injested_payload_length, data, size);
+        memcpy(parser->frame.payload.binary + parser->injested_payload_length,
+               data,
+               size);
         break;
     case FRAME_OPCODE_TEXT:
-        memcpy(parser->frame.payload.text + parser->injested_payload_length, data, size);
+        memcpy(parser->frame.payload.text + parser->injested_payload_length,
+               data,
+               size);
         if (parser->injested_payload_length + size == parser->frame.payload_length)
             parser->frame.payload.text[parser->frame.payload_length] = '\0';
         break;
@@ -187,8 +209,11 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
             parser->injested_payload_length += 2;
         }
         if (parser->injested_payload_length >= 2 &&
-                parser->frame.payload_length > parser->injested_payload_length)
-            memcpy(parser->frame.payload.close.reason + parser->injested_payload_length - 2, data, size);
+            parser->frame.payload_length > parser->injested_payload_length)
+            memcpy(parser->frame.payload.close.reason +
+                       parser->injested_payload_length - 2,
+                   data,
+                   size);
         break;
     default:
         break;
@@ -197,10 +222,12 @@ frame_parser_injest(frame_parser_t *parser, uint8_t *data, size_t size, size_t *
     parser->injested_payload_length += size;
     if (parser->injested_payload_length > parser->frame.payload_length)
         return FRAME_PARSER_INJEST_RESULT_ERROR;
-    if (parser->injested_payload_length == parser->frame.payload_length) {
+    if (parser->injested_payload_length == parser->frame.payload_length)
+    {
         if (parser->frame.opcode == FRAME_OPCODE_CLOSE &&
             parser->frame.payload.close.reason != NULL &&
-           !is_valid_utf8(parser->frame.payload.close.reason, parser->frame.payload_length - 2))
+            !is_valid_utf8(parser->frame.payload.close.reason,
+                           parser->frame.payload_length - 2))
             return FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD;
         return FRAME_PARSER_INJEST_RESULT_DONE;
     }
@@ -305,12 +332,18 @@ frame_print(const frame_t *frame)
         {
             printf("\"%s\"", frame->payload.text);
         }
-        else {
+        else
+        {
             char x = frame->payload.text[0];
             int count = 0;
-            for (size_t i = 0; i < frame->payload_length; i++) {
-                if (frame->payload.text[i] != x) {
-                    printf("payload at %zu, different: %x vs %x\n", i, x, frame->payload.text[i]);
+            for (size_t i = 0; i < frame->payload_length; i++)
+            {
+                if (frame->payload.text[i] != x)
+                {
+                    printf("payload at %zu, different: %x vs %x\n",
+                           i,
+                           x,
+                           frame->payload.text[i]);
                     count++;
                     break;
                 }

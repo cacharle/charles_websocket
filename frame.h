@@ -56,7 +56,8 @@ typedef enum
     FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL,
 } frame_parser_injest_result_t;
 
-#define FRAME_PARSER_INJEST_RESULT_IS_ERROR(e) ((e) >= FRAME_PARSER_INJEST_RESULT_ERROR)
+#define FRAME_PARSER_INJEST_RESULT_IS_ERROR(e) \
+    ((e) >= FRAME_PARSER_INJEST_RESULT_ERROR)
 
 void
 frame_parser_init(frame_parser_t *parser);

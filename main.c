@@ -1,6 +1,7 @@
 #include "server.h"
 
-int main()
+int
+main()
 {
     server_t server;
     server_init(&server, 8080);
