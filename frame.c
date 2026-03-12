@@ -28,6 +28,8 @@ frame_parser_init(frame_parser_t *parser)
     parser->header_parsed = false;
     parser->injested_payload_length = 0;
     parser->header_buffer_position = 0;
+    memset(&parser->frame, 0, sizeof(frame_t));
+    parser->frame.opcode = -1;
 }
 
 static uint16_t valid_close_codes[] = {
