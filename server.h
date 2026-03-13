@@ -37,7 +37,7 @@ server_init(server_t *server, uint16_t port);
 void
 server_start(server_t *server);
 bool
-client_injest(client_t *client, uint8_t *buffer, size_t size);
+client_ingest(client_t *client, uint8_t *buffer, size_t size);
 void
 client_close(client_t *client, int close_code);
 bool

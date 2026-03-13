@@ -104,7 +104,7 @@ server_start(server_t *server)
                 if (recv_size < 0)
                     die("Invalid recv");
                 to_remove[i] =
-                    client_injest(&server->clients[i], recv_buffer, recv_size);
+                    client_ingest(&server->clients[i], recv_buffer, recv_size);
             }
         }
 
@@ -131,7 +131,7 @@ server_start(server_t *server)
 }
 
 bool
-client_injest(client_t *client, uint8_t *buffer, size_t size)
+client_ingest(client_t *client, uint8_t *buffer, size_t size)
 {
     if (!client->handshake_completed)
     {
@@ -146,41 +146,41 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
         return false;
     }
 
-    size_t remining_size = size;
-    while (remining_size != 0)
+    size_t remaining_size = size;
+    while (remaining_size != 0)
     {
-        frame_parser_injest_result_t injest_result =
-            frame_parser_injest(&client->parser, buffer, size, &remining_size);
-        buffer += size - remining_size;
-        size = remining_size;
-        if (FRAME_PARSER_INJEST_RESULT_IS_ERROR(injest_result))
+        frame_parser_ingest_result_t ingest_result =
+            frame_parser_ingest(&client->parser, buffer, size, &remaining_size);
+        buffer += size - remaining_size;
+        size = remaining_size;
+        if (FRAME_PARSER_ingest_RESULT_IS_ERROR(ingest_result))
         {
             frame_destroy(&client->parser.frame);
             int close_code = 1000;
-            switch (injest_result)
+            switch (ingest_result)
             {
-            case FRAME_PARSER_INJEST_RESULT_ERROR:
+            case FRAME_PARSER_ingest_RESULT_ERROR:
                 close_code = 1000;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL:
+            case FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL:
                 close_code = 1002;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_UNSUPPORTED_DATA:
+            case FRAME_PARSER_ingest_RESULT_ERROR_UNSUPPORTED_DATA:
                 close_code = 1003;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD:
+            case FRAME_PARSER_ingest_RESULT_ERROR_INVALID_PAYLOAD:
                 close_code = 1007;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_POLICY_VIOLATION:
+            case FRAME_PARSER_ingest_RESULT_ERROR_POLICY_VIOLATION:
                 close_code = 1008;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_TOO_BIG:
+            case FRAME_PARSER_ingest_RESULT_ERROR_TOO_BIG:
                 close_code = 1009;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_EXTENSION_NEEDED:
+            case FRAME_PARSER_ingest_RESULT_ERROR_EXTENSION_NEEDED:
                 close_code = 1010;
                 break;
-            case FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL:
+            case FRAME_PARSER_ingest_RESULT_ERROR_INTERNAL:
                 close_code = 1011;
                 break;
             default:
@@ -189,11 +189,11 @@ client_injest(client_t *client, uint8_t *buffer, size_t size)
             client_close(client, close_code);
             return true;
         }
-        else if (injest_result == FRAME_PARSER_INJEST_RESULT_PENDING)
+        else if (ingest_result == FRAME_PARSER_ingest_RESULT_PENDING)
         {
             return false;
         }
-        else if (injest_result == FRAME_PARSER_INJEST_RESULT_DONE)
+        else if (ingest_result == FRAME_PARSER_ingest_RESULT_DONE)
         {
             // frame_print(&client->parser.frame);
             bool to_remove = client_handle_frame(client, &client->parser.frame);

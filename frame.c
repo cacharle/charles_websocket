@@ -12,7 +12,7 @@
 struct frame_header_layout
 {
     // First byte in network order (logical protocol order is
-    // final->reserverd->opcode)
+    // final->reserved->opcode)
     uint8_t opcode : 4;
     uint8_t reserved : 3;
     uint8_t final_frame : 1;
@@ -26,7 +26,7 @@ void
 frame_parser_init(frame_parser_t *parser)
 {
     parser->header_parsed = false;
-    parser->injested_payload_length = 0;
+    parser->ingested_payload_length = 0;
     parser->header_buffer_position = 0;
     memset(&parser->frame, 0, sizeof(frame_t));
     parser->frame.opcode = -1;
@@ -37,13 +37,13 @@ static uint16_t valid_close_codes[] = {
 constexpr size_t valid_close_codes_length =
     sizeof(valid_close_codes) / sizeof(valid_close_codes[0]);
 
-frame_parser_injest_result_t
-frame_parser_injest(frame_parser_t *parser,
+frame_parser_ingest_result_t
+frame_parser_ingest(frame_parser_t *parser,
                     uint8_t *data,
                     size_t size,
-                    size_t *remining_data_size)
+                    size_t *remaining_data_size)
 {
-    *remining_data_size = 0;
+    *remaining_data_size = 0;
 
     if (!parser->header_parsed)
     {
@@ -55,7 +55,7 @@ frame_parser_injest(frame_parser_t *parser,
         size_t initial_header_buffer_position = parser->header_buffer_position;
         parser->header_buffer_position += copied_size;
         if (parser->header_buffer_position < sizeof(struct frame_header_layout))
-            return FRAME_PARSER_INJEST_RESULT_PENDING;
+            return FRAME_PARSER_ingest_RESULT_PENDING;
 
         struct frame_header_layout *layout = (void *)parser->header_buffer;
         parser->frame.final = layout->final_frame;
@@ -67,23 +67,23 @@ frame_parser_injest(frame_parser_t *parser,
             parser->frame.opcode != FRAME_OPCODE_CLOSE &&
             parser->frame.opcode != FRAME_OPCODE_PING &&
             parser->frame.opcode != FRAME_OPCODE_PONG)
-            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
         if ((parser->frame.opcode == FRAME_OPCODE_CLOSE ||
              parser->frame.opcode == FRAME_OPCODE_PING ||
              parser->frame.opcode == FRAME_OPCODE_PONG) &&
             layout->payload_length_start > 125)
-            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
 
         if (!parser->frame.final &&
             parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
             parser->frame.opcode != FRAME_OPCODE_TEXT &&
             parser->frame.opcode != FRAME_OPCODE_BINARY)
-            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
         if (layout->reserved != 0)
-            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
         // Client to server MUST be masked
         if (!layout->mask)
-            return FRAME_PARSER_INJEST_RESULT_ERROR;
+            return FRAME_PARSER_ingest_RESULT_ERROR;
         size_t size_of_payload_length = 0;
         uint8_t *header_buffer_ptr =
             parser->header_buffer + sizeof(struct frame_header_layout);
@@ -95,7 +95,7 @@ frame_parser_injest(frame_parser_t *parser,
             size_of_payload_length = sizeof(uint16_t);
             if (parser->header_buffer_position <
                 sizeof(struct frame_header_layout) + size_of_payload_length)
-                return FRAME_PARSER_INJEST_RESULT_PENDING;
+                return FRAME_PARSER_ingest_RESULT_PENDING;
             parser->frame.payload_length = ntohs(*(uint16_t *)header_buffer_ptr);
         }
         else if (layout->payload_length_start == 127)
@@ -103,7 +103,7 @@ frame_parser_injest(frame_parser_t *parser,
             size_of_payload_length = sizeof(uint64_t);
             if (parser->header_buffer_position <
                 sizeof(struct frame_header_layout) + size_of_payload_length)
-                return FRAME_PARSER_INJEST_RESULT_PENDING;
+                return FRAME_PARSER_ingest_RESULT_PENDING;
             parser->frame.payload_length = be64toh(*(uint64_t *)header_buffer_ptr);
         }
         header_buffer_ptr += size_of_payload_length;
@@ -111,7 +111,7 @@ frame_parser_injest(frame_parser_t *parser,
         if (parser->header_buffer_position < sizeof(struct frame_header_layout) +
                                                  size_of_payload_length +
                                                  sizeof(uint32_t))
-            return FRAME_PARSER_INJEST_RESULT_PENDING;
+            return FRAME_PARSER_ingest_RESULT_PENDING;
         parser->masking_key = *(uint32_t *)header_buffer_ptr;
         parser->header_parsed = true;
 
@@ -147,15 +147,15 @@ frame_parser_injest(frame_parser_t *parser,
     if (size > parser->frame.payload_length)
     {
         size_t size_to_consume =
-            parser->frame.payload_length - parser->injested_payload_length;
-        *remining_data_size = size - size_to_consume;
+            parser->frame.payload_length - parser->ingested_payload_length;
+        *remaining_data_size = size - size_to_consume;
         size = size_to_consume;
     }
 
     // Unmask data payload
     for (size_t i = 0; i < size; i++)
     {
-        size_t offset = i + parser->injested_payload_length;
+        size_t offset = i + parser->ingested_payload_length;
         data[i] ^= ((uint8_t *)&parser->masking_key)[offset % 4];
     }
 
@@ -165,23 +165,23 @@ frame_parser_injest(frame_parser_t *parser,
     case FRAME_OPCODE_PING:
     case FRAME_OPCODE_PONG:
     case FRAME_OPCODE_CONTINUATION:
-        memcpy(parser->frame.payload.binary + parser->injested_payload_length,
+        memcpy(parser->frame.payload.binary + parser->ingested_payload_length,
                data,
                size);
         break;
     case FRAME_OPCODE_TEXT:
-        memcpy(parser->frame.payload.text + parser->injested_payload_length,
+        memcpy(parser->frame.payload.text + parser->ingested_payload_length,
                data,
                size);
-        if (parser->injested_payload_length + size == parser->frame.payload_length)
+        if (parser->ingested_payload_length + size == parser->frame.payload_length)
             parser->frame.payload.text[parser->frame.payload_length] = '\0';
         break;
     case FRAME_OPCODE_CLOSE:
         // The code has to be 2 bytes or absent, it makes no sense to get a 1 byte
         // payload for a close frame
         if (parser->frame.payload_length == 1)
-            return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
-        if (parser->injested_payload_length == 0 && size >= 2)
+            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+        if (parser->ingested_payload_length == 0 && size >= 2)
         {
             parser->frame.payload.close.status_code = ntohs(*(uint16_t *)data);
             bool is_valid = false;
@@ -197,15 +197,15 @@ frame_parser_injest(frame_parser_t *parser,
                 parser->frame.payload.close.status_code <= 4999)
                 is_valid = true;
             if (!is_valid)
-                return FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL;
+                return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
             data += sizeof(uint16_t);
             size -= sizeof(uint16_t);
-            parser->injested_payload_length += 2;
+            parser->ingested_payload_length += 2;
         }
-        if (parser->injested_payload_length >= 2 &&
-            parser->frame.payload_length > parser->injested_payload_length)
+        if (parser->ingested_payload_length >= 2 &&
+            parser->frame.payload_length > parser->ingested_payload_length)
             memcpy(parser->frame.payload.close.reason +
-                       parser->injested_payload_length - 2,
+                       parser->ingested_payload_length - 2,
                    data,
                    size);
         break;
@@ -213,20 +213,20 @@ frame_parser_injest(frame_parser_t *parser,
         break;
     }
     // Check if we're done parsing the frame
-    parser->injested_payload_length += size;
-    if (parser->injested_payload_length > parser->frame.payload_length)
-        return FRAME_PARSER_INJEST_RESULT_ERROR;
-    if (parser->injested_payload_length == parser->frame.payload_length)
+    parser->ingested_payload_length += size;
+    if (parser->ingested_payload_length > parser->frame.payload_length)
+        return FRAME_PARSER_ingest_RESULT_ERROR;
+    if (parser->ingested_payload_length == parser->frame.payload_length)
     {
         if (parser->frame.opcode == FRAME_OPCODE_CLOSE &&
             parser->frame.payload.close.reason != NULL &&
             !is_valid_utf8(parser->frame.payload.close.reason,
                            parser->frame.payload_length - 2))
-            return FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD;
-        return FRAME_PARSER_INJEST_RESULT_DONE;
+            return FRAME_PARSER_ingest_RESULT_ERROR_INVALID_PAYLOAD;
+        return FRAME_PARSER_ingest_RESULT_DONE;
     }
     else
-        return FRAME_PARSER_INJEST_RESULT_PENDING;
+        return FRAME_PARSER_ingest_RESULT_PENDING;
 }
 
 void

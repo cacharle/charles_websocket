@@ -37,35 +37,35 @@ typedef struct
     frame_t frame;
     uint32_t masking_key;
     bool header_parsed;
-    size_t injested_payload_length;
+    size_t ingested_payload_length;
     uint8_t header_buffer[16];
     size_t header_buffer_position;
 } frame_parser_t;
 
 typedef enum
 {
-    FRAME_PARSER_INJEST_RESULT_DONE,
-    FRAME_PARSER_INJEST_RESULT_PENDING,
-    FRAME_PARSER_INJEST_RESULT_ERROR,
-    FRAME_PARSER_INJEST_RESULT_ERROR_PROTOCOL,
-    FRAME_PARSER_INJEST_RESULT_ERROR_UNSUPPORTED_DATA,
-    FRAME_PARSER_INJEST_RESULT_ERROR_INVALID_PAYLOAD,
-    FRAME_PARSER_INJEST_RESULT_ERROR_POLICY_VIOLATION,
-    FRAME_PARSER_INJEST_RESULT_ERROR_TOO_BIG,
-    FRAME_PARSER_INJEST_RESULT_ERROR_EXTENSION_NEEDED,
-    FRAME_PARSER_INJEST_RESULT_ERROR_INTERNAL,
-} frame_parser_injest_result_t;
+    FRAME_PARSER_ingest_RESULT_DONE,
+    FRAME_PARSER_ingest_RESULT_PENDING,
+    FRAME_PARSER_ingest_RESULT_ERROR,
+    FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL,
+    FRAME_PARSER_ingest_RESULT_ERROR_UNSUPPORTED_DATA,
+    FRAME_PARSER_ingest_RESULT_ERROR_INVALID_PAYLOAD,
+    FRAME_PARSER_ingest_RESULT_ERROR_POLICY_VIOLATION,
+    FRAME_PARSER_ingest_RESULT_ERROR_TOO_BIG,
+    FRAME_PARSER_ingest_RESULT_ERROR_EXTENSION_NEEDED,
+    FRAME_PARSER_ingest_RESULT_ERROR_INTERNAL,
+} frame_parser_ingest_result_t;
 
-#define FRAME_PARSER_INJEST_RESULT_IS_ERROR(e) \
-    ((e) >= FRAME_PARSER_INJEST_RESULT_ERROR)
+#define FRAME_PARSER_ingest_RESULT_IS_ERROR(e) \
+    ((e) >= FRAME_PARSER_ingest_RESULT_ERROR)
 
 void
 frame_parser_init(frame_parser_t *parser);
-frame_parser_injest_result_t
-frame_parser_injest(frame_parser_t *parser,
+frame_parser_ingest_result_t
+frame_parser_ingest(frame_parser_t *parser,
                     uint8_t *data,
                     size_t size,
-                    size_t *remining_data_size);
+                    size_t *remaining_data_size);
 
 void
 frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size);
