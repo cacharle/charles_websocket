@@ -1,9 +1,23 @@
 #ifndef CHARLES_WEBSOCKET_HANDSHAKE_H
 #define CHARLES_WEBSOCKET_HANDSHAKE_H
 
+#include <stddef.h>
+
+typedef struct
+{
+    char *host;
+    char *path;
+    char *websocket_key;
+    char *websocket_accept;
+} handshake_t;
+
 void
-websocket_accept(const char *client_key, char *out);
+handshake_init(handshake_t *handshake);
+bool
+handshake_parse_request(handshake_t *handshake, char *request, size_t request_size);
 void
-parse_request_and_generate_response(char *request, char *response);
+handshake_write_response(handshake_t *handshake,
+                         char *response,
+                         size_t response_size);
 
 #endif  // CHARLES_WEBSOCKET_HANDSHAKE_H

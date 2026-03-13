@@ -137,8 +137,15 @@ client_ingest(client_t *client, uint8_t *buffer, size_t size)
     {
         // FIXME: this handshake code is horrendous
         buffer[size] = '\0';
+        handshake_t handshake;
+        handshake_init(&handshake);
+        if (!handshake_parse_request(&handshake, (char *)buffer, size))
+        {
+            client_close(client, 1002);
+            return true;
+        }
         char response[1024];
-        parse_request_and_generate_response((char *)buffer, response);
+        handshake_write_response(&handshake, response, sizeof response);
         int ret = send(client->fd, response, strlen(response), 0);
         if (ret < 0)
             die("Counldn't send handshake");
