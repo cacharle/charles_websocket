@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <openssl/err.h>
 #include <openssl/ssl.h>
 
 #include "handshake.h"
@@ -18,15 +19,31 @@
 #include "utils.h"
 #include "xlibc.h"
 
-void
-server_init(server_t *server, uint16_t port, bool ssl)
+void server_init(server_t *server,
+                 uint16_t port,
+                 bool ssl_enabled,
+                 char *cert_path,
+                 char *key_path)
 {
-    if (ssl)
+    if (ssl_enabled)
     {
         SSL_library_init();
         SSL_load_error_strings();
         OpenSSL_add_ssl_algorithms();
+        server->ssl_context = SSL_CTX_new(TLS_server_method());
+        if (server->ssl_context == NULL)
+        {
+            ERR_print_errors_fp(stderr);
+            xdie("Unable to create SSL context");
+        }
+        SSL_CTX_use_certificate_file(
+            server->ssl_context, cert_path, SSL_FILETYPE_PEM);
+        SSL_CTX_use_PrivateKey_file(server->ssl_context, key_path, SSL_FILETYPE_PEM);
+        if (!SSL_CTX_check_private_key(server->ssl_context))
+            xdie("Private key does not match certificate\n");
     }
+    else
+        server->ssl_context = NULL;
     server->fd = socket(AF_INET, SOCK_STREAM, 0);
     server->clients_count = 0;
     if (server->fd < 0)
@@ -47,8 +64,7 @@ server_init(server_t *server, uint16_t port, bool ssl)
         xdie("Couldn't listen on socket");
 }
 
-void
-server_start(server_t *server)
+void server_start(server_t *server)
 {
     // sigset_t sigint_mask;
     // sigemptyset(&sigint_mask);
@@ -86,17 +102,29 @@ server_start(server_t *server)
                 xdie("Too many clients");
             struct sockaddr_in client_addr;
             socklen_t client_addr_len = sizeof client_addr;
-            server->clients[server->clients_count].fd = accept(
+            client_t *client = &server->clients[server->clients_count];
+            client->fd = accept(
                 server->fd, (struct sockaddr *)&client_addr, &client_addr_len);
-            server->clients[server->clients_count].closed = false;
-            server->clients[server->clients_count].handshake_completed = false;
-            server->clients[server->clients_count].defragmentation_state.active =
-                false;
-            server->clients[server->clients_count].defragmentation_state.payload =
-                NULL;
-            server->clients[server->clients_count]
-                .defragmentation_state.payload_length = 0;
-            frame_parser_init(&server->clients[server->clients_count].parser);
+            if (client->fd == -1)
+                xdie("Unable to accept client");  // TODO: not die
+            if (server->ssl_context != NULL)
+            {
+                client->ssl = SSL_new(server->ssl_context);
+                SSL_set_fd(client->ssl, client->fd);
+                if (SSL_accept(client->ssl) != 1)
+                {
+                    ERR_print_errors_fp(stderr);
+                    xdie("Unable to accept SSL client");  // TODO: not die
+                }
+            }
+            else
+                client->ssl = NULL;
+            client->closed = false;
+            client->handshake_completed = false;
+            client->defragmentation_state.active = false;
+            client->defragmentation_state.payload = NULL;
+            client->defragmentation_state.payload_length = 0;
+            frame_parser_init(&client->parser);
             server->clients_count++;
             continue;
         }
@@ -109,12 +137,25 @@ server_start(server_t *server)
             if (pollfds[i + 1].revents & POLLIN)
             {
                 uint8_t recv_buffer[RECV_BUFFER_SIZE];
-                int recv_size =
-                    recv(server->clients[i].fd, recv_buffer, RECV_BUFFER_SIZE, 0);
-                if (recv_size < 0)
-                    xdie("Invalid recv");
-                to_remove[i] =
-                    client_ingest(&server->clients[i], recv_buffer, recv_size);
+                size_t recv_size;
+                client_t *client = &server->clients[i];
+                if (client->ssl == NULL)
+                {
+                    int result = recv(client->fd, recv_buffer, RECV_BUFFER_SIZE, 0);
+                    if (result < 0)
+                        xdie("Invalid recv");
+                    recv_size = result;
+                }
+                else
+                {
+                    int result = SSL_read_ex(client->ssl, recv_buffer, RECV_BUFFER_SIZE, &recv_size);
+                    if (result != 1)
+                    {
+                        ERR_print_errors_fp(stderr);
+                        xdie("Invalid SSL_read");
+                    }
+                }
+                to_remove[i] = client_ingest(client, recv_buffer, recv_size);
             }
         }
 
@@ -138,10 +179,14 @@ server_start(server_t *server)
     for (size_t i = 0; i <= server->clients_count; i++)
         client_close(&server->clients[i], 1000);
     close(server->fd);
+    if (server->ssl_context != NULL)
+    {
+        SSL_CTX_free(server->ssl_context);
+        EVP_cleanup();
+    }
 }
 
-bool
-client_ingest(client_t *client, uint8_t *buffer, size_t size)
+bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
 {
     if (!client->handshake_completed)
     {
@@ -156,9 +201,7 @@ client_ingest(client_t *client, uint8_t *buffer, size_t size)
         }
         char response[1024];
         handshake_write_response(&handshake, response, sizeof response);
-        int ret = send(client->fd, response, strlen(response), 0);
-        if (ret < 0)
-            xdie("Counldn't send handshake");
+        client_send(client, response, strlen(response));
         client->handshake_completed = true;
         return false;
     }
@@ -242,8 +285,7 @@ char *close_status_reason[] = {
     // 1015 is reserved and should not be used
 };
 
-void
-client_close(client_t *client, int close_code)
+void client_close(client_t *client, int close_code)
 {
     if (client->closed)
         return;
@@ -257,12 +299,16 @@ client_close(client_t *client, int close_code)
         .payload.close.status_code = close_code,
         .payload.close.reason = close_reason,
     };
-    frame_send(&close_frame, client->fd);
+    client_send_frame(client, &close_frame);
+    if (client->ssl != NULL)
+    {
+        SSL_shutdown(client->ssl);
+        SSL_free(client->ssl);
+    }
     close(client->fd);
 }
 
-bool
-client_handle_frame(client_t *client, frame_t *frame)
+bool client_handle_frame(client_t *client, frame_t *frame)
 {
     switch (frame->opcode)
     {
@@ -273,7 +319,7 @@ client_handle_frame(client_t *client, frame_t *frame)
     {
         frame_t ping_frame = *frame;
         ping_frame.opcode = FRAME_OPCODE_PONG;
-        frame_send(&ping_frame, client->fd);
+        client_send_frame(client, &ping_frame);
         return false;
     }
     case FRAME_OPCODE_PONG:
@@ -288,7 +334,7 @@ client_handle_frame(client_t *client, frame_t *frame)
             if (frame->opcode == FRAME_OPCODE_TEXT &&
                 !is_valid_utf8(frame->payload.text, frame->payload_length))
                 return true;
-            frame_send(frame, client->fd);
+            client_send_frame(client, frame);
         }
         else
         {
@@ -325,7 +371,7 @@ client_handle_frame(client_t *client, frame_t *frame)
                 .payload_length = client->defragmentation_state.payload_length,
                 .payload.binary = client->defragmentation_state.payload,
             };
-            frame_send(&sent_frame, client->fd);
+            client_send_frame(client, &sent_frame);
             free(client->defragmentation_state.payload);
             client->defragmentation_state.active = false;
             client->defragmentation_state.payload = NULL;
@@ -334,4 +380,33 @@ client_handle_frame(client_t *client, frame_t *frame)
         return false;
     }
     abort();
+}
+
+void client_send(client_t *client, void *buffer, size_t size)
+{
+    size_t send_bytes;
+    if (client->ssl == NULL)
+    {
+        int result = send(client->fd, buffer, size, 0);
+        if (result < 0)
+            xdie("Counldn't send handshake");
+        send_bytes = result;
+    }
+    else
+    {
+        int result = SSL_write_ex(client->ssl, buffer, size, &send_bytes);
+        if (result != 1)
+        {
+            ERR_print_errors_fp(stderr);
+            xdie("Invalid SSL_write");
+        }
+    }
+}
+
+void client_send_frame(client_t *client, frame_t *frame)
+{
+    void *send_buffer = xmalloc(frame->payload_length + 16);
+    size_t send_buffer_size;
+    frame_dump(frame, send_buffer, &send_buffer_size);
+    client_send(client, send_buffer, send_buffer_size);
 }

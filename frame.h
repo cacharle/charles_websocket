@@ -59,21 +59,14 @@ typedef enum
 #define FRAME_PARSER_ingest_RESULT_IS_ERROR(e) \
     ((e) >= FRAME_PARSER_ingest_RESULT_ERROR)
 
-void
-frame_parser_init(frame_parser_t *parser);
-frame_parser_ingest_result_t
-frame_parser_ingest(frame_parser_t *parser,
-                    uint8_t *data,
-                    size_t size,
-                    size_t *remaining_data_size);
+void frame_parser_init(frame_parser_t *parser);
+frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
+                                                 uint8_t *data,
+                                                 size_t size,
+                                                 size_t *remaining_data_size);
 
-void
-frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size);
-void
-frame_send(frame_t *frame, int fd);
-void
-frame_print(const frame_t *frame);
-void
-frame_destroy(frame_t *frame);
+void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size);
+void frame_print(const frame_t *frame);
+void frame_destroy(frame_t *frame);
 
 #endif  // CHARLES_WEBSOCKET_FRAME_H

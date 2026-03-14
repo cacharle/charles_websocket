@@ -24,8 +24,7 @@ struct frame_header_layout
     uint8_t mask : 1;
 };
 
-void
-frame_parser_init(frame_parser_t *parser)
+void frame_parser_init(frame_parser_t *parser)
 {
     parser->header_parsed = false;
     parser->ingested_payload_length = 0;
@@ -39,11 +38,10 @@ static uint16_t valid_close_codes[] = {
 constexpr size_t valid_close_codes_length =
     sizeof(valid_close_codes) / sizeof(valid_close_codes[0]);
 
-frame_parser_ingest_result_t
-frame_parser_ingest(frame_parser_t *parser,
-                    uint8_t *data,
-                    size_t size,
-                    size_t *remaining_data_size)
+frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
+                                                 uint8_t *data,
+                                                 size_t size,
+                                                 size_t *remaining_data_size)
 {
     *remaining_data_size = 0;
 
@@ -231,8 +229,7 @@ frame_parser_ingest(frame_parser_t *parser,
         return FRAME_PARSER_ingest_RESULT_PENDING;
 }
 
-void
-frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
+void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
 {
     struct frame_header_layout *layout = (void *)dest;
     layout->final_frame = frame->final;
@@ -268,29 +265,15 @@ frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
         break;
     case FRAME_OPCODE_CLOSE:
         *(uint16_t *)bytes_rest = htons(frame->payload.close.status_code);
-        bytes_rest += sizeof(uint16_t);
         if (frame->payload_length > 2 && frame->payload.close.reason != NULL)
             memcpy(
-                bytes_rest, frame->payload.close.reason, frame->payload_length - 2);
-        bytes_rest -= sizeof(uint16_t);  // HACK: for dest_size after
+                bytes_rest + sizeof(uint16_t), frame->payload.close.reason, frame->payload_length - 2);
         break;
     default:
         break;
     }
     size_t header_size = bytes_rest - (void *)layout;
     *dest_size = header_size + frame->payload_length;
-}
-
-void
-frame_send(frame_t *frame, int fd)
-{
-    void *send_buffer = xmalloc(frame->payload_length + 16);
-    size_t send_buffer_size;
-    frame_dump(frame, send_buffer, &send_buffer_size);
-    int ret = send(fd, send_buffer, send_buffer_size, 0);
-    free(send_buffer);
-    if (ret == -1)
-        xdie("Failed to send");
 }
 
 char *opcode_to_string[] = {
@@ -302,8 +285,7 @@ char *opcode_to_string[] = {
     [FRAME_OPCODE_PONG] = "pong",
 };
 
-void
-frame_print(const frame_t *frame)
+void frame_print(const frame_t *frame)
 {
     printf("frame{final: %d, opcode: %s, payload_length: %zu, payload: ",
            frame->final,
@@ -361,8 +343,7 @@ frame_print(const frame_t *frame)
     printf("}\n");
 }
 
-void
-frame_destroy(frame_t *frame)
+void frame_destroy(frame_t *frame)
 {
     switch (frame->opcode)
     {

@@ -2,10 +2,10 @@
   "outdir": "./reports/server",
   "servers": [
     {
-      "url": "ws://localhost:8080"
+      "url": "wss://localhost:8080"
     }
   ],
-  "cases": ["1.*"],
+  "cases": ["*"],
   "exclude-cases": ["7.1.6"],
   "exclude-agent-cases": {}
 }

@@ -9,8 +9,7 @@
 #include "handshake.h"
 #include "xlibc.h"
 
-void
-handshake_init(handshake_t *handshake)
+void handshake_init(handshake_t *handshake)
 {
     handshake->host = NULL;
     handshake->path = NULL;
@@ -18,8 +17,9 @@ handshake_init(handshake_t *handshake)
     handshake->websocket_accept = NULL;
 }
 
-bool
-handshake_parse_request(handshake_t *handshake, char *request, size_t request_size)
+bool handshake_parse_request(handshake_t *handshake,
+                             char *request,
+                             size_t request_size)
 {
     (void)request_size;
     char *end_of_line = strstr(request, "\r\n");
@@ -86,10 +86,9 @@ handshake_parse_request(handshake_t *handshake, char *request, size_t request_si
     return true;
 }
 
-void
-handshake_write_response(handshake_t *handshake,
-                         char *response,
-                         size_t response_size)
+void handshake_write_response(handshake_t *handshake,
+                              char *response,
+                              size_t response_size)
 {
     const char *magic_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     char combined[256];

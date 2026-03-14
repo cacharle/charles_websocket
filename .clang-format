@@ -20,9 +20,6 @@ AlignEscapedNewlines: Left
 AlignTrailingComments: true
 AlignAfterOpenBracket: Align
 
-AlwaysBreakAfterDefinitionReturnType: All
-AlwaysBreakAfterReturnType: All
-
 SpaceBeforeParens: ControlStatements
 
 AllowShortFunctionsOnASingleLine: None

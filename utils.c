@@ -12,8 +12,7 @@
 #include "xlibc.h"
 
 // LLM generated
-bool
-is_valid_utf8(const char *s_origin, size_t len)
+bool is_valid_utf8(const char *s_origin, size_t len)
 {
     size_t i = 0;
     const unsigned char *s = (const unsigned char *)s_origin;
@@ -86,4 +85,3 @@ is_valid_utf8(const char *s_origin, size_t len)
 
     return true;
 }
-

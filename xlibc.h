@@ -14,15 +14,15 @@ void *xrealloc(void *ptr, size_t size);
 char *xstrdup(const char *ptr);
 char *xstrndup(const char *ptr, size_t size);
 
-#endif // XLIBC_H
+#endif  // XLIBC_H
 
 #ifdef XLIBC_IMPLEMENTATION
 
-#include <stdlib.h>
-#include <string.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 static const char *xprogram_name = NULL;
 

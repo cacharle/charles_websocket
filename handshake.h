@@ -11,13 +11,12 @@ typedef struct
     char *websocket_accept;
 } handshake_t;
 
-void
-handshake_init(handshake_t *handshake);
-bool
-handshake_parse_request(handshake_t *handshake, char *request, size_t request_size);
-void
-handshake_write_response(handshake_t *handshake,
-                         char *response,
-                         size_t response_size);
+void handshake_init(handshake_t *handshake);
+bool handshake_parse_request(handshake_t *handshake,
+                             char *request,
+                             size_t request_size);
+void handshake_write_response(handshake_t *handshake,
+                              char *response,
+                              size_t response_size);
 
 #endif  // CHARLES_WEBSOCKET_HANDSHAKE_H
