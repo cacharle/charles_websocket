@@ -1,9 +1,10 @@
 #ifndef CHARLES_WEBSOCKET_SERVER_H
 #define CHARLES_WEBSOCKET_SERVER_H
 
-#include "frame.h"
 #include <stddef.h>
 #include <stdint.h>
+
+#include "frame.h"
 
 #define SERVER_MAX_CLIENTS 1024
 #define RECV_BUFFER_SIZE 4096
@@ -25,15 +26,21 @@ typedef struct
     frame_parser_t parser;
 } client_t;
 
+typedef int (*read_func_t)(int, void *, size_t);
+typedef int (*write_func_t)(int, void *, size_t);
+
 typedef struct
 {
     int fd;
     size_t clients_count;
     client_t clients[SERVER_MAX_CLIENTS];
+    bool ssl;
+    read_func_t read_func;
+    write_func_t write_func;
 } server_t;
 
 void
-server_init(server_t *server, uint16_t port);
+server_init(server_t *server, uint16_t port, bool ssl);
 void
 server_start(server_t *server);
 bool

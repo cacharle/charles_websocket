@@ -1,8 +1,5 @@
 #define _GNU_SOURCE
 
-#include "server.h"
-#include "handshake.h"
-#include "utils.h"
 #include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -14,13 +11,26 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <openssl/ssl.h>
+
+#include "handshake.h"
+#include "server.h"
+#include "utils.h"
+#include "xlibc.h"
+
 void
-server_init(server_t *server, uint16_t port)
+server_init(server_t *server, uint16_t port, bool ssl)
 {
+    if (ssl)
+    {
+        SSL_library_init();
+        SSL_load_error_strings();
+        OpenSSL_add_ssl_algorithms();
+    }
     server->fd = socket(AF_INET, SOCK_STREAM, 0);
     server->clients_count = 0;
     if (server->fd < 0)
-        die("Couldn't create socket");
+        xdie("Couldn't create socket");
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons(port),
@@ -31,10 +41,10 @@ server_init(server_t *server, uint16_t port)
     setsockopt(server->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     int ret = bind(server->fd, (struct sockaddr *)&addr, sizeof addr);
     if (ret < 0)
-        die("Couldn't bind socket");
+        xdie("Couldn't bind socket");
     listen(server->fd, 8);
     if (ret < 0)
-        die("Couldn't listen on socket");
+        xdie("Couldn't listen on socket");
 }
 
 void
@@ -66,14 +76,14 @@ server_start(server_t *server)
                 break;
             }
             else
-                die("ppoll");
+                xdie("ppoll");
         }
 
         // Accept a new client and add it to the client list
         if (pollfds[0].revents & POLLIN)
         {
             if (server->clients_count == SERVER_MAX_CLIENTS)
-                die("Too many clients");
+                xdie("Too many clients");
             struct sockaddr_in client_addr;
             socklen_t client_addr_len = sizeof client_addr;
             server->clients[server->clients_count].fd = accept(
@@ -102,7 +112,7 @@ server_start(server_t *server)
                 int recv_size =
                     recv(server->clients[i].fd, recv_buffer, RECV_BUFFER_SIZE, 0);
                 if (recv_size < 0)
-                    die("Invalid recv");
+                    xdie("Invalid recv");
                 to_remove[i] =
                     client_ingest(&server->clients[i], recv_buffer, recv_size);
             }
@@ -148,7 +158,7 @@ client_ingest(client_t *client, uint8_t *buffer, size_t size)
         handshake_write_response(&handshake, response, sizeof response);
         int ret = send(client->fd, response, strlen(response), 0);
         if (ret < 0)
-            die("Counldn't send handshake");
+            xdie("Counldn't send handshake");
         client->handshake_completed = true;
         return false;
     }

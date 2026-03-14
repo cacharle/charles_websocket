@@ -1,4 +1,3 @@
-#include "utils.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -7,25 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-void *
-xmalloc(size_t size)
-{
-    void *ret = malloc(size);
-    if (ret == NULL)
-        die("Unable to malloc");
-    return ret;
-}
+#include "utils.h"
 
-void *
-xrealloc(void *ptr, size_t size)
-{
-    if (size == 0)
-        return NULL;
-    void *ret = realloc(ptr, size);
-    if (ret == NULL)
-        die("Unable to realloc");
-    return ret;
-}
+#define XLIBC_IMPLEMENTATION
+#include "xlibc.h"
 
 // LLM generated
 bool
@@ -103,14 +87,3 @@ is_valid_utf8(const char *s_origin, size_t len)
     return true;
 }
 
-void
-die(const char *format, ...)
-{
-    va_list ap;
-    va_start(ap, format);
-    fputs("cws: ", stderr);
-    vfprintf(stderr, format, ap);
-    fprintf(stderr, ": %s\n", strerror(errno));
-    va_end(ap);
-    exit(EXIT_FAILURE);
-}

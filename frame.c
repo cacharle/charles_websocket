@@ -1,11 +1,13 @@
-#include "frame.h"
-#include "utils.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "frame.h"
+#include "utils.h"
+#include "xlibc.h"
 
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 
@@ -288,7 +290,7 @@ frame_send(frame_t *frame, int fd)
     int ret = send(fd, send_buffer, send_buffer_size, 0);
     free(send_buffer);
     if (ret == -1)
-        die("Failed to send");
+        xdie("Failed to send");
 }
 
 char *opcode_to_string[] = {

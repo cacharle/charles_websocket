@@ -40,7 +40,7 @@ BinPackParameters: false
 BreakBeforeBraces: Allman
 BreakBeforeTernaryOperators: true
 
-IncludeBlocks: Merge
+IncludeBlocks: Preserve
 
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1

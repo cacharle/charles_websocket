@@ -1,4 +1,3 @@
-#include "handshake.h"
 #include <assert.h>
 #include <ctype.h>
 #include <openssl/bio.h>
@@ -6,6 +5,9 @@
 #include <openssl/sha.h>
 #include <stdbool.h>
 #include <string.h>
+
+#include "handshake.h"
+#include "xlibc.h"
 
 void
 handshake_init(handshake_t *handshake)
@@ -40,7 +42,7 @@ handshake_parse_request(handshake_t *handshake, char *request, size_t request_si
     *first_line_split_ptr++ = '\0';
     if (tmp[0] != '/')
         return false;
-    handshake->path = strdup(tmp);
+    handshake->path = xstrdup(tmp);
 
     // null byte added at the start
     if (strcmp(first_line_split_ptr, "HTTP/1.1") != 0)
@@ -72,9 +74,9 @@ handshake_parse_request(handshake_t *handshake, char *request, size_t request_si
         if (strcasecmp(current_line, "Sec-WebSocket-Version") == 0)
             header_websocket_version = value;
         if (strcasecmp(current_line, "Host") == 0)
-            handshake->host = strdup(value);
+            handshake->host = xstrdup(value);
         if (strcasecmp(current_line, "Sec-WebSocket-Key") == 0)
-            handshake->websocket_key = strdup(value);
+            handshake->websocket_key = xstrdup(value);
     }
     if (handshake->host == NULL || handshake->websocket_key == NULL ||
         strcasecmp(header_upgrade, "WebSocket") != 0 ||
