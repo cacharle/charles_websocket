@@ -7,6 +7,7 @@
 #include <openssl/ssl.h>
 
 #include "frame.h"
+#include "handshake.h"
 
 #define SERVER_MAX_CLIENTS 1024
 #define RECV_BUFFER_SIZE 4096
@@ -24,6 +25,7 @@ typedef struct
     bool closed;
     int fd;
     bool handshake_completed;
+    permessage_deflate_t permessage_deflate;
     defragmentation_state_t defragmentation_state;
     frame_parser_t parser;
     SSL *ssl;

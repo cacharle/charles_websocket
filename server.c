@@ -13,6 +13,7 @@
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <zlib.h>
 
 #include "handshake.h"
 #include "server.h"
@@ -148,7 +149,8 @@ void server_start(server_t *server)
                 }
                 else
                 {
-                    int result = SSL_read_ex(client->ssl, recv_buffer, RECV_BUFFER_SIZE, &recv_size);
+                    int result = SSL_read_ex(
+                        client->ssl, recv_buffer, RECV_BUFFER_SIZE, &recv_size);
                     if (result != 1)
                     {
                         ERR_print_errors_fp(stderr);
@@ -190,12 +192,12 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
 {
     if (!client->handshake_completed)
     {
-        // FIXME: this handshake code is horrendous
         buffer[size] = '\0';
         handshake_t handshake;
         handshake_init(&handshake);
         if (!handshake_parse_request(&handshake, (char *)buffer, size))
         {
+            handshake_destroy(&handshake);
             client_close(client, 1002);
             return true;
         }
@@ -203,6 +205,7 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
         handshake_write_response(&handshake, response, sizeof response);
         client_send(client, response, strlen(response));
         client->handshake_completed = true;
+        handshake_destroy(&handshake);
         return false;
     }
 
@@ -213,34 +216,34 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
             frame_parser_ingest(&client->parser, buffer, size, &remaining_size);
         buffer += size - remaining_size;
         size = remaining_size;
-        if (FRAME_PARSER_ingest_RESULT_IS_ERROR(ingest_result))
+        if (FRAME_PARSER_INGEST_RESULT_IS_ERROR(ingest_result))
         {
             frame_destroy(&client->parser.frame);
             int close_code = 1000;
             switch (ingest_result)
             {
-            case FRAME_PARSER_ingest_RESULT_ERROR:
+            case FRAME_PARSER_INGEST_RESULT_ERROR:
                 close_code = 1000;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL:
                 close_code = 1002;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_UNSUPPORTED_DATA:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_UNSUPPORTED_DATA:
                 close_code = 1003;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_INVALID_PAYLOAD:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_INVALID_PAYLOAD:
                 close_code = 1007;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_POLICY_VIOLATION:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_POLICY_VIOLATION:
                 close_code = 1008;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_TOO_BIG:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_TOO_BIG:
                 close_code = 1009;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_EXTENSION_NEEDED:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_EXTENSION_NEEDED:
                 close_code = 1010;
                 break;
-            case FRAME_PARSER_ingest_RESULT_ERROR_INTERNAL:
+            case FRAME_PARSER_INGEST_RESULT_ERROR_INTERNAL:
                 close_code = 1011;
                 break;
             default:
@@ -249,13 +252,13 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
             client_close(client, close_code);
             return true;
         }
-        else if (ingest_result == FRAME_PARSER_ingest_RESULT_PENDING)
+        else if (ingest_result == FRAME_PARSER_INGEST_RESULT_PENDING)
         {
             return false;
         }
-        else if (ingest_result == FRAME_PARSER_ingest_RESULT_DONE)
+        else if (ingest_result == FRAME_PARSER_INGEST_RESULT_DONE)
         {
-            // frame_print(&client->parser.frame);
+            frame_print(&client->parser.frame);
             bool to_remove = client_handle_frame(client, &client->parser.frame);
             frame_destroy(&client->parser.frame);
             frame_parser_init(&client->parser);
@@ -331,6 +334,7 @@ bool client_handle_frame(client_t *client, frame_t *frame)
             return true;
         if (frame->final)
         {
+            frame_uncompress(frame);
             if (frame->opcode == FRAME_OPCODE_TEXT &&
                 !is_valid_utf8(frame->payload.text, frame->payload_length))
                 return true;
@@ -361,16 +365,17 @@ bool client_handle_frame(client_t *client, frame_t *frame)
         client->defragmentation_state.payload_length += frame->payload_length;
         if (frame->final)
         {
-            if (client->defragmentation_state.opcode == FRAME_OPCODE_TEXT &&
-                !is_valid_utf8(client->defragmentation_state.payload,
-                               client->defragmentation_state.payload_length))
-                return true;
             frame_t sent_frame = {
                 .final = true,
                 .opcode = client->defragmentation_state.opcode,
                 .payload_length = client->defragmentation_state.payload_length,
                 .payload.binary = client->defragmentation_state.payload,
             };
+            frame_uncompress(&sent_frame);
+            if (client->defragmentation_state.opcode == FRAME_OPCODE_TEXT &&
+                !is_valid_utf8(client->defragmentation_state.payload,
+                               client->defragmentation_state.payload_length))
+                return true;
             client_send_frame(client, &sent_frame);
             free(client->defragmentation_state.payload);
             client->defragmentation_state.active = false;
@@ -405,6 +410,7 @@ void client_send(client_t *client, void *buffer, size_t size)
 
 void client_send_frame(client_t *client, frame_t *frame)
 {
+    frame_compress(frame);
     void *send_buffer = xmalloc(frame->payload_length + 16);
     size_t send_buffer_size;
     frame_dump(frame, send_buffer, &send_buffer_size);

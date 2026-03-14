@@ -18,6 +18,7 @@ typedef enum
 typedef struct
 {
     bool final;
+    bool permessage_deflate;
     frame_opcode_t opcode;
     size_t payload_length;
     union
@@ -44,20 +45,20 @@ typedef struct
 
 typedef enum
 {
-    FRAME_PARSER_ingest_RESULT_DONE,
-    FRAME_PARSER_ingest_RESULT_PENDING,
-    FRAME_PARSER_ingest_RESULT_ERROR,
-    FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL,
-    FRAME_PARSER_ingest_RESULT_ERROR_UNSUPPORTED_DATA,
-    FRAME_PARSER_ingest_RESULT_ERROR_INVALID_PAYLOAD,
-    FRAME_PARSER_ingest_RESULT_ERROR_POLICY_VIOLATION,
-    FRAME_PARSER_ingest_RESULT_ERROR_TOO_BIG,
-    FRAME_PARSER_ingest_RESULT_ERROR_EXTENSION_NEEDED,
-    FRAME_PARSER_ingest_RESULT_ERROR_INTERNAL,
+    FRAME_PARSER_INGEST_RESULT_DONE,
+    FRAME_PARSER_INGEST_RESULT_PENDING,
+    FRAME_PARSER_INGEST_RESULT_ERROR,
+    FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL,
+    FRAME_PARSER_INGEST_RESULT_ERROR_UNSUPPORTED_DATA,
+    FRAME_PARSER_INGEST_RESULT_ERROR_INVALID_PAYLOAD,
+    FRAME_PARSER_INGEST_RESULT_ERROR_POLICY_VIOLATION,
+    FRAME_PARSER_INGEST_RESULT_ERROR_TOO_BIG,
+    FRAME_PARSER_INGEST_RESULT_ERROR_EXTENSION_NEEDED,
+    FRAME_PARSER_INGEST_RESULT_ERROR_INTERNAL,
 } frame_parser_ingest_result_t;
 
-#define FRAME_PARSER_ingest_RESULT_IS_ERROR(e) \
-    ((e) >= FRAME_PARSER_ingest_RESULT_ERROR)
+#define FRAME_PARSER_INGEST_RESULT_IS_ERROR(e) \
+    ((e) >= FRAME_PARSER_INGEST_RESULT_ERROR)
 
 void frame_parser_init(frame_parser_t *parser);
 frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
@@ -68,5 +69,8 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
 void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size);
 void frame_print(const frame_t *frame);
 void frame_destroy(frame_t *frame);
+
+void frame_compress(frame_t *frame);
+void frame_uncompress(frame_t *frame);
 
 #endif  // CHARLES_WEBSOCKET_FRAME_H

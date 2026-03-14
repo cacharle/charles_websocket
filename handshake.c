@@ -15,6 +15,19 @@ void handshake_init(handshake_t *handshake)
     handshake->path = NULL;
     handshake->websocket_key = NULL;
     handshake->websocket_accept = NULL;
+    handshake->permessage_deflate.enabled = false;
+    handshake->permessage_deflate.client_no_context_takeover = false;
+    handshake->permessage_deflate.server_no_context_takeover = false;
+    handshake->permessage_deflate.client_max_window_bits = 15;
+    handshake->permessage_deflate.server_max_window_bits = 15;
+}
+
+void handshake_destroy(handshake_t *handshake)
+{
+    free(handshake->host);
+    free(handshake->path);
+    free(handshake->websocket_key);
+    free(handshake->websocket_accept);
 }
 
 bool handshake_parse_request(handshake_t *handshake,
@@ -77,6 +90,41 @@ bool handshake_parse_request(handshake_t *handshake,
             handshake->host = xstrdup(value);
         if (strcasecmp(current_line, "Sec-WebSocket-Key") == 0)
             handshake->websocket_key = xstrdup(value);
+        if (strcasecmp(current_line, "Sec-WebSocket-Extensions") == 0)
+        {
+            char *token;
+            while ((token = strsep(&value, "; ")) != NULL)
+            {
+                if (*token == '\0')
+                    continue;
+                if (strcasecmp(token, "permessage-deflate") == 0)
+                {
+                    handshake->permessage_deflate.enabled = true;
+                }
+                else if (strcasecmp(token, "client_no_context_takeover") == 0)
+                {
+                    handshake->permessage_deflate.client_no_context_takeover = true;
+                }
+                else if (strcasecmp(token, "server_no_context_takeover") == 0)
+                {
+                    handshake->permessage_deflate.server_no_context_takeover = true;
+                }
+                else
+                {
+                    char *equal_sign = strchr(token, '=');
+                    if (equal_sign != NULL)
+                    {
+                        *equal_sign++ = '\0';
+                        if (strcasecmp(token, "client_max_window_bits") == 0)
+                            handshake->permessage_deflate.client_max_window_bits =
+                                atoi(equal_sign);
+                        else if (strcasecmp(token, "server_max_window_bits") == 0)
+                            handshake->permessage_deflate.server_max_window_bits =
+                                atoi(equal_sign);
+                    }
+                }
+            }
+        }
     }
     if (handshake->host == NULL || handshake->websocket_key == NULL ||
         strcasecmp(header_upgrade, "WebSocket") != 0 ||
@@ -100,9 +148,24 @@ void handshake_write_response(handshake_t *handshake,
     int len = EVP_EncodeBlock((unsigned char *)accept_key, sha1, SHA_DIGEST_LENGTH);
     accept_key[len] = '\0';
 
-    char format[] = "HTTP/1.1 101 Switching Protocols\r\n"
-                    "Upgrade: websocket\r\n"
-                    "Connection: Upgrade\r\n"
-                    "Sec-WebSocket-Accept: %s\r\n\r\n";
-    snprintf(response, response_size, format, accept_key);
+    char *response_start = "HTTP/1.1 101 Switching Protocols\r\n"
+                           "Upgrade: websocket\r\n"
+                           "Connection: Upgrade\r\n"
+                           "Sec-WebSocket-Accept:";
+    char *next = stpcpy(response, response_start);
+    next = stpcpy(next, accept_key);
+    next = stpcpy(next, "\r\n");
+    if (handshake->permessage_deflate.enabled)
+    {
+        next = stpcpy(next,
+                      "Sec-WebSocket-Extensions: permessage-deflate; "
+                      "server_max_window_bits=");
+        next += sprintf(
+            next, "%d", handshake->permessage_deflate.server_max_window_bits);
+        if (handshake->permessage_deflate.server_no_context_takeover)
+            next = stpcpy(next, ";  server_no_context_takeover");
+        next = stpcpy(next, "\r\n");
+    }
+    strncat(response, "\r\n", response_size);
+    printf("Sending: %s\n", response);
 }

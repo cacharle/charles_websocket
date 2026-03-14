@@ -5,13 +5,24 @@
 
 typedef struct
 {
+    bool enabled;
+    int client_max_window_bits;
+    int server_max_window_bits;
+    bool client_no_context_takeover;
+    bool server_no_context_takeover;
+} permessage_deflate_t;
+
+typedef struct
+{
     char *host;
     char *path;
     char *websocket_key;
     char *websocket_accept;
+    permessage_deflate_t permessage_deflate;
 } handshake_t;
 
 void handshake_init(handshake_t *handshake);
+void handshake_destroy(handshake_t *handshake);
 bool handshake_parse_request(handshake_t *handshake,
                              char *request,
                              size_t request_size);

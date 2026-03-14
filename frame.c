@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <zlib.h>
+
 #include "frame.h"
 #include "utils.h"
 #include "xlibc.h"
@@ -16,7 +18,8 @@ struct frame_header_layout
     // First byte in network order (logical protocol order is
     // final->reserved->opcode)
     uint8_t opcode : 4;
-    uint8_t reserved : 3;
+    uint8_t reserved : 2;
+    uint8_t permessage_deflate : 1;
     uint8_t final_frame : 1;
     // Second byte in network order (logical protocol order is
     // mask->payload_length_start)
@@ -55,10 +58,11 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         size_t initial_header_buffer_position = parser->header_buffer_position;
         parser->header_buffer_position += copied_size;
         if (parser->header_buffer_position < sizeof(struct frame_header_layout))
-            return FRAME_PARSER_ingest_RESULT_PENDING;
+            return FRAME_PARSER_INGEST_RESULT_PENDING;
 
         struct frame_header_layout *layout = (void *)parser->header_buffer;
         parser->frame.final = layout->final_frame;
+        parser->frame.permessage_deflate = layout->permessage_deflate;
         parser->frame.opcode = layout->opcode;
         // Check if the start layout is valid
         if (parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
@@ -67,23 +71,26 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
             parser->frame.opcode != FRAME_OPCODE_CLOSE &&
             parser->frame.opcode != FRAME_OPCODE_PING &&
             parser->frame.opcode != FRAME_OPCODE_PONG)
-            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         if ((parser->frame.opcode == FRAME_OPCODE_CLOSE ||
              parser->frame.opcode == FRAME_OPCODE_PING ||
              parser->frame.opcode == FRAME_OPCODE_PONG) &&
-            layout->payload_length_start > 125)
-            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+            (layout->payload_length_start > 125 ||
+                !parser->frame.final ||
+                parser->frame.permessage_deflate
+             ))
+            return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
 
-        if (!parser->frame.final &&
-            parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
-            parser->frame.opcode != FRAME_OPCODE_TEXT &&
-            parser->frame.opcode != FRAME_OPCODE_BINARY)
-            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+        // if (!parser->frame.final &&
+        //     parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
+        //     parser->frame.opcode != FRAME_OPCODE_TEXT &&
+        //     parser->frame.opcode != FRAME_OPCODE_BINARY)
+        //     return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         if (layout->reserved != 0)
-            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         // Client to server MUST be masked
         if (!layout->mask)
-            return FRAME_PARSER_ingest_RESULT_ERROR;
+            return FRAME_PARSER_INGEST_RESULT_ERROR;
         size_t size_of_payload_length = 0;
         uint8_t *header_buffer_ptr =
             parser->header_buffer + sizeof(struct frame_header_layout);
@@ -95,7 +102,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
             size_of_payload_length = sizeof(uint16_t);
             if (parser->header_buffer_position <
                 sizeof(struct frame_header_layout) + size_of_payload_length)
-                return FRAME_PARSER_ingest_RESULT_PENDING;
+                return FRAME_PARSER_INGEST_RESULT_PENDING;
             parser->frame.payload_length = ntohs(*(uint16_t *)header_buffer_ptr);
         }
         else if (layout->payload_length_start == 127)
@@ -103,7 +110,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
             size_of_payload_length = sizeof(uint64_t);
             if (parser->header_buffer_position <
                 sizeof(struct frame_header_layout) + size_of_payload_length)
-                return FRAME_PARSER_ingest_RESULT_PENDING;
+                return FRAME_PARSER_INGEST_RESULT_PENDING;
             parser->frame.payload_length = be64toh(*(uint64_t *)header_buffer_ptr);
         }
         header_buffer_ptr += size_of_payload_length;
@@ -111,7 +118,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         if (parser->header_buffer_position < sizeof(struct frame_header_layout) +
                                                  size_of_payload_length +
                                                  sizeof(uint32_t))
-            return FRAME_PARSER_ingest_RESULT_PENDING;
+            return FRAME_PARSER_INGEST_RESULT_PENDING;
         parser->masking_key = *(uint32_t *)header_buffer_ptr;
         parser->header_parsed = true;
 
@@ -180,7 +187,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         // The code has to be 2 bytes or absent, it makes no sense to get a 1 byte
         // payload for a close frame
         if (parser->frame.payload_length == 1)
-            return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+            return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         if (parser->ingested_payload_length == 0 && size >= 2)
         {
             parser->frame.payload.close.status_code = ntohs(*(uint16_t *)data);
@@ -197,7 +204,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
                 parser->frame.payload.close.status_code <= 4999)
                 is_valid = true;
             if (!is_valid)
-                return FRAME_PARSER_ingest_RESULT_ERROR_PROTOCOL;
+                return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
             data += sizeof(uint16_t);
             size -= sizeof(uint16_t);
             parser->ingested_payload_length += 2;
@@ -215,18 +222,69 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
     // Check if we're done parsing the frame
     parser->ingested_payload_length += size;
     if (parser->ingested_payload_length > parser->frame.payload_length)
-        return FRAME_PARSER_ingest_RESULT_ERROR;
+        return FRAME_PARSER_INGEST_RESULT_ERROR;
     if (parser->ingested_payload_length == parser->frame.payload_length)
     {
         if (parser->frame.opcode == FRAME_OPCODE_CLOSE &&
             parser->frame.payload.close.reason != NULL &&
             !is_valid_utf8(parser->frame.payload.close.reason,
                            parser->frame.payload_length - 2))
-            return FRAME_PARSER_ingest_RESULT_ERROR_INVALID_PAYLOAD;
-        return FRAME_PARSER_ingest_RESULT_DONE;
+            return FRAME_PARSER_INGEST_RESULT_ERROR_INVALID_PAYLOAD;
+        return FRAME_PARSER_INGEST_RESULT_DONE;
     }
     else
-        return FRAME_PARSER_ingest_RESULT_PENDING;
+        return FRAME_PARSER_INGEST_RESULT_PENDING;
+}
+
+void frame_compress(frame_t *frame)
+{
+    if (!frame->permessage_deflate)
+        return;
+    if (frame->opcode != FRAME_OPCODE_BINARY && frame->opcode != FRAME_OPCODE_TEXT)
+        return;
+    size_t compressed_length = compressBound(frame->payload_length);
+    void *compressed = malloc(compressed_length);
+    int result = compress_z(
+        compressed,
+        &compressed_length,
+        frame->payload.binary,
+        frame->payload_length);
+    if (result != Z_OK)
+        xdie("Unable to compress: %s", zError(result));
+    free(frame->payload.binary);
+    frame->payload.binary = compressed;
+    frame->payload_length = compressed_length;
+}
+
+void frame_uncompress(frame_t *frame)
+{
+    if (!frame->permessage_deflate)
+        return;
+    if (frame->opcode != FRAME_OPCODE_BINARY && frame->opcode != FRAME_OPCODE_TEXT)
+        return;
+    // Reappropriated from ixWebsocket: https://github.com/machinezone/IXWebSocket/blob/master/ixwebsocket/IXGzipCodec.cpp
+    z_stream stream;
+    memset(&stream, 0, sizeof(stream));
+    int result = inflateInit2(&stream, -15);
+    if (result != Z_OK)
+        xdie("Unable to inflateInit2: %s", zError(result));
+    uint8_t buffer[4096];
+    void *decompressed = NULL;
+    size_t decompressed_length = 0;
+    do
+    {
+        stream.avail_out = 4096;
+        stream.next_out = buffer;
+        result = inflate(&stream, Z_SYNC_FLUSH);
+        if (result != Z_OK)
+            xdie("Unable to inflate: %s", zError(result));
+        decompressed = xrealloc(decompressed, decompressed_length + 4096);
+        memcpy(decompressed + decompressed_length, buffer, 4096 - stream.avail_out);
+        decompressed_length += 4096;
+    } while (stream.avail_out == 0);
+    free(frame->payload.binary);
+    frame->payload.binary = decompressed;
+    frame->payload_length = decompressed_length;
 }
 
 void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
@@ -251,28 +309,26 @@ void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
         *(uint64_t *)bytes_rest = htobe64(frame->payload_length);
         bytes_rest += sizeof(uint64_t);
     }
+    size_t header_size = bytes_rest - (void *)layout;
     switch (frame->opcode)
     {
     case FRAME_OPCODE_BINARY:
     case FRAME_OPCODE_PING:
     case FRAME_OPCODE_PONG:
-        if (frame->payload.binary != NULL)
-            memcpy(bytes_rest, frame->payload.binary, frame->payload_length);
-        break;
     case FRAME_OPCODE_TEXT:
-        if (frame->payload.text != NULL)
-            memcpy(bytes_rest, frame->payload.text, frame->payload_length);
+        if (frame->payload.binary != NULL)
+                memcpy(bytes_rest, frame->payload.binary, frame->payload_length);
         break;
     case FRAME_OPCODE_CLOSE:
         *(uint16_t *)bytes_rest = htons(frame->payload.close.status_code);
         if (frame->payload_length > 2 && frame->payload.close.reason != NULL)
-            memcpy(
-                bytes_rest + sizeof(uint16_t), frame->payload.close.reason, frame->payload_length - 2);
+            memcpy(bytes_rest + sizeof(uint16_t),
+                   frame->payload.close.reason,
+                   frame->payload_length - 2);
         break;
     default:
         break;
     }
-    size_t header_size = bytes_rest - (void *)layout;
     *dest_size = header_size + frame->payload_length;
 }
 
@@ -287,8 +343,9 @@ char *opcode_to_string[] = {
 
 void frame_print(const frame_t *frame)
 {
-    printf("frame{final: %d, opcode: %s, payload_length: %zu, payload: ",
+    printf("frame{final: %d, deflate: %d, opcode: %s, payload_length: %zu, payload: ",
            frame->final,
+           frame->permessage_deflate,
            opcode_to_string[frame->opcode],
            frame->payload_length);
     switch (frame->opcode)
