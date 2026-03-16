@@ -65,12 +65,15 @@ void server_init(server_t *server,
         xdie("Couldn't listen on socket");
 }
 
+static bool sigint_triggered = false;
+void sigint_handler(int)
+{
+    sigint_triggered = true;
+}
+
 void server_start(server_t *server)
 {
-    // sigset_t sigint_mask;
-    // sigemptyset(&sigint_mask);
-    // sigaddset(&sigint_mask, SIGINT);
-
+    signal(SIGINT, sigint_handler);
     while (true)
     {
         struct pollfd pollfds[SERVER_MAX_CLIENTS + 1];
@@ -84,17 +87,16 @@ void server_start(server_t *server)
             pollfds[i + 1].events = POLLIN;
             pollfds[i + 1].revents = 0;
         }
-        int ret = ppoll(pollfds, server->clients_count + 1, NULL, NULL);
-        if (ret < 0)
+        int ret = poll(pollfds, server->clients_count + 1, 10);
+        if (ret == 0)  // Timeout
+            continue;
+        if (sigint_triggered)
         {
-            if (errno == EINTR)
-            {
-                printf("Interrupted by Ctrl-C\n");
-                break;
-            }
-            else
-                xdie("ppoll");
+            printf("Interrupted by Ctrl-C\n");
+            break;
         }
+        if (ret < 0)
+            xdie("ppoll");
 
         // Accept a new client and add it to the client list
         if (pollfds[0].revents & POLLIN)

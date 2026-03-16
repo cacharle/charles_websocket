@@ -75,10 +75,8 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         if ((parser->frame.opcode == FRAME_OPCODE_CLOSE ||
              parser->frame.opcode == FRAME_OPCODE_PING ||
              parser->frame.opcode == FRAME_OPCODE_PONG) &&
-            (layout->payload_length_start > 125 ||
-                !parser->frame.final ||
-                parser->frame.permessage_deflate
-             ))
+            (layout->payload_length_start > 125 || !parser->frame.final ||
+             parser->frame.permessage_deflate))
             return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
 
         // if (!parser->frame.final &&
@@ -244,13 +242,13 @@ void frame_compress(frame_t *frame)
         return;
     size_t compressed_length = compressBound(frame->payload_length);
     void *compressed = malloc(compressed_length);
-    int result = compress_z(
-        compressed,
-        &compressed_length,
-        frame->payload.binary,
-        frame->payload_length);
-    if (result != Z_OK)
-        xdie("Unable to compress: %s", zError(result));
+    // int result = compress_z(
+    //     compressed,
+    //     &compressed_length,
+    //     frame->payload.binary,
+    //     frame->payload_length);
+    // if (result != Z_OK)
+    //     xdie("Unable to compress: %s", zError(result));
     free(frame->payload.binary);
     frame->payload.binary = compressed;
     frame->payload_length = compressed_length;
@@ -262,7 +260,8 @@ void frame_uncompress(frame_t *frame)
         return;
     if (frame->opcode != FRAME_OPCODE_BINARY && frame->opcode != FRAME_OPCODE_TEXT)
         return;
-    // Reappropriated from ixWebsocket: https://github.com/machinezone/IXWebSocket/blob/master/ixwebsocket/IXGzipCodec.cpp
+    // Reappropriated from ixWebsocket:
+    // https://github.com/machinezone/IXWebSocket/blob/master/ixwebsocket/IXGzipCodec.cpp
     z_stream stream;
     memset(&stream, 0, sizeof(stream));
     int result = inflateInit2(&stream, -15);
@@ -317,7 +316,7 @@ void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
     case FRAME_OPCODE_PONG:
     case FRAME_OPCODE_TEXT:
         if (frame->payload.binary != NULL)
-                memcpy(bytes_rest, frame->payload.binary, frame->payload_length);
+            memcpy(bytes_rest, frame->payload.binary, frame->payload_length);
         break;
     case FRAME_OPCODE_CLOSE:
         *(uint16_t *)bytes_rest = htons(frame->payload.close.status_code);
@@ -343,7 +342,8 @@ char *opcode_to_string[] = {
 
 void frame_print(const frame_t *frame)
 {
-    printf("frame{final: %d, deflate: %d, opcode: %s, payload_length: %zu, payload: ",
+    printf("frame{final: %d, deflate: %d, opcode: %s, payload_length: %zu, "
+           "payload: ",
            frame->final,
            frame->permessage_deflate,
            opcode_to_string[frame->opcode],
