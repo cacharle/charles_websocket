@@ -323,8 +323,8 @@ void frame_uncompress(frame_t *frame)
     free(frame->payload.binary);
     frame->payload.binary = decompressed;
     frame->payload_length = decompressed_length;
-    printf("HERE AFTER UNCOMPRESS\n");
-    frame_print(frame);
+    // printf("HERE AFTER UNCOMPRESS\n");
+    // frame_print(frame);
     inflateEnd(&stream);
 }
 
@@ -333,6 +333,7 @@ void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
     struct frame_header_layout *layout = (void *)dest;
     layout->final_frame = frame->final;
     layout->reserved = 0;
+    layout->permessage_deflate = frame->permessage_deflate;
     layout->opcode = frame->opcode;
     layout->mask = 0;
     void *bytes_rest = (void *)dest + sizeof(struct frame_header_layout);

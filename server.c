@@ -205,6 +205,8 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
         }
         handshake.permessage_deflate.server_no_context_takeover = true;
         handshake.permessage_deflate.client_no_context_takeover = true;
+        handshake.permessage_deflate.server_max_window_bits = 15;
+        handshake.permessage_deflate.client_max_window_bits = 15;
         char response[1024];
         handshake_write_response(&handshake, response, sizeof response);
         client_send(client, response, strlen(response));
@@ -417,9 +419,9 @@ void client_send(client_t *client, void *buffer, size_t size)
 
 void client_send_frame(client_t *client, frame_t *frame)
 {
+    frame_compress(frame);
     // printf("BEFORE SEND\n");
     // frame_print(frame);
-    frame_compress(frame);
     void *send_buffer = xmalloc(frame->payload_length + 16);
     size_t send_buffer_size;
     frame_dump(frame, send_buffer, &send_buffer_size);
