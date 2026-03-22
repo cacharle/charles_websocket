@@ -264,7 +264,7 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
         }
         else if (ingest_result == FRAME_PARSER_INGEST_RESULT_DONE)
         {
-            frame_print(&client->parser.frame);
+            // frame_print(&client->parser.frame);
             bool to_remove = client_handle_frame(client, &client->parser.frame);
             frame_destroy(&client->parser.frame);
             frame_parser_init(&client->parser);

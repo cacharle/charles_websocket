@@ -313,7 +313,7 @@ void frame_uncompress(frame_t *frame)
         stream.avail_out = 4096;
         stream.next_out = buffer;
         result = inflate(&stream, Z_SYNC_FLUSH);
-        if (result != Z_OK && result != Z_STREAM_END)
+        if (result != Z_OK && result != Z_STREAM_END && result != Z_BUF_ERROR)
             xdie("Unable to inflate: %s", zError(result));
         size_t output_size = 4096 - stream.avail_out;
         decompressed = xrealloc(decompressed, decompressed_length + output_size);
