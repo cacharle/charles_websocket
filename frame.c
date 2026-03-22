@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <assert.h>
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -240,18 +241,47 @@ void frame_compress(frame_t *frame)
         return;
     if (frame->opcode != FRAME_OPCODE_BINARY && frame->opcode != FRAME_OPCODE_TEXT)
         return;
-    size_t compressed_length = compressBound(frame->payload_length);
-    void *compressed = malloc(compressed_length);
-    // int result = compress_z(
-    //     compressed,
-    //     &compressed_length,
-    //     frame->payload.binary,
-    //     frame->payload_length);
-    // if (result != Z_OK)
-    //     xdie("Unable to compress: %s", zError(result));
+    // From:
+    // https://github.com/machinezone/IXWebSocket/blob/master/ixwebsocket/IXWebSocketPerMessageDeflateCodec.cpp#L106
+    if (frame->payload_length == 0)
+    {
+        frame->payload.binary = xmalloc(2);
+        memcpy(frame->payload.binary, "\x02\x00", 2);
+        frame->payload_length = 2;
+        return;
+    }
+
+    z_stream stream;
+    memset(&stream, 0, sizeof stream);
+    int result = deflateInit2(
+        &stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -1 * 15, 4, Z_DEFAULT_STRATEGY);
+    if (result != Z_OK)
+        xdie("Unable to deflateInit2: %s", zError(result));
+
+    stream.next_in = frame->payload.binary;
+    stream.avail_in = frame->payload_length;
+    uint8_t buffer[4096];
+    void *compressed = NULL;
+    size_t compressed_length = 0;
+    do
+    {
+        stream.avail_out = 4096;
+        stream.next_out = buffer;
+        deflate(&stream, Z_FULL_FLUSH);
+        size_t output_size = 4096 - stream.avail_out;
+        compressed = xrealloc(compressed, compressed_length + output_size);
+        memcpy(compressed + compressed_length, buffer, output_size);
+        compressed_length += output_size;
+    } while (stream.avail_out == 0);
+
+    // Remove the empty uncompressed block if there is any at the end
+    if (compressed_length > 4 &&
+        memcmp(compressed + compressed_length - 4, "\x00\x00\xff\xff", 4) == 0)
+        compressed_length -= 4;
     free(frame->payload.binary);
     frame->payload.binary = compressed;
     frame->payload_length = compressed_length;
+    deflateEnd(&stream);
 }
 
 void frame_uncompress(frame_t *frame)
@@ -261,12 +291,20 @@ void frame_uncompress(frame_t *frame)
     if (frame->opcode != FRAME_OPCODE_BINARY && frame->opcode != FRAME_OPCODE_TEXT)
         return;
     // Reappropriated from ixWebsocket:
-    // https://github.com/machinezone/IXWebSocket/blob/master/ixwebsocket/IXGzipCodec.cpp
+    // https://github.com/machinezone/IXWebSocket/blob/master/ixwebsocket/IXWebSocketPerMessageDeflateCodec.cpp#L209
     z_stream stream;
     memset(&stream, 0, sizeof(stream));
-    int result = inflateInit2(&stream, -15);
+    int result = inflateInit2(&stream, -1 * 15);  // 15 is inflate bits
     if (result != Z_OK)
         xdie("Unable to inflateInit2: %s", zError(result));
+
+    // Append the 4 magic bytes at the end of the payload
+    size_t input_size = frame->payload_length + 4;
+    frame->payload.binary = xrealloc(frame->payload.binary, input_size);
+    memcpy(frame->payload.binary + frame->payload_length, "\x00\x00\xff\xff", 4);
+    stream.avail_in = input_size;
+    stream.next_in = frame->payload.binary;
+
     uint8_t buffer[4096];
     void *decompressed = NULL;
     size_t decompressed_length = 0;
@@ -275,15 +313,19 @@ void frame_uncompress(frame_t *frame)
         stream.avail_out = 4096;
         stream.next_out = buffer;
         result = inflate(&stream, Z_SYNC_FLUSH);
-        if (result != Z_OK)
+        if (result != Z_OK && result != Z_STREAM_END)
             xdie("Unable to inflate: %s", zError(result));
-        decompressed = xrealloc(decompressed, decompressed_length + 4096);
-        memcpy(decompressed + decompressed_length, buffer, 4096 - stream.avail_out);
-        decompressed_length += 4096;
+        size_t output_size = 4096 - stream.avail_out;
+        decompressed = xrealloc(decompressed, decompressed_length + output_size);
+        memcpy(decompressed + decompressed_length, buffer, output_size);
+        decompressed_length += output_size;
     } while (stream.avail_out == 0);
     free(frame->payload.binary);
     frame->payload.binary = decompressed;
     frame->payload_length = decompressed_length;
+    printf("HERE AFTER UNCOMPRESS\n");
+    frame_print(frame);
+    inflateEnd(&stream);
 }
 
 void frame_dump(frame_t *frame, uint8_t *dest, size_t *dest_size)
@@ -363,28 +405,37 @@ void frame_print(const frame_t *frame)
         printf("]");
         break;
     case FRAME_OPCODE_TEXT:
-        if (frame->payload_length < 100)
+        if (frame->payload_length < 256)
         {
-            printf("\"%s\"", frame->payload.text);
-        }
-        else
-        {
-            char x = frame->payload.text[0];
-            int count = 0;
+            printf("\"");
             for (size_t i = 0; i < frame->payload_length; i++)
             {
-                if (frame->payload.text[i] != x)
+                // printf(" | HERE %zu %d\n", i, frame->payload.text[i]);
+                if (frame->payload.text[i] == '\\')
+                    printf("\\\\");
+                else if (frame->payload.text[i] == '"')
+                    printf("\\\"");
+                else if (frame->payload.text[i] != ' ' &&
+                         isspace(frame->payload.text[i]))
                 {
-                    printf("payload at %zu, different: %x vs %x\n",
-                           i,
-                           x,
-                           frame->payload.text[i]);
-                    count++;
-                    break;
+                    char lookup[] = {
+                        ['\f'] = 'f',
+                        ['\n'] = 'n',
+                        ['\r'] = 'r',
+                        ['\t'] = 't',
+                        ['\v'] = 'v',
+                    };
+                    printf("\\%c", lookup[(int)frame->payload.text[i]]);
                 }
+                else if (isprint(frame->payload.text[i]))
+                    printf("%c", frame->payload.text[i]);
+                else
+                    printf("\\x%02x", (unsigned char)frame->payload.text[i]);
             }
-            printf("too long to print %d", count);
+            printf("\"");
         }
+        else
+            printf("too long to print");
         break;
     case FRAME_OPCODE_CLOSE:
         printf("[%u] ", frame->payload.close.status_code);

@@ -203,6 +203,8 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
             client_close(client, 1002);
             return true;
         }
+        handshake.permessage_deflate.server_no_context_takeover = true;
+        handshake.permessage_deflate.client_no_context_takeover = true;
         char response[1024];
         handshake_write_response(&handshake, response, sizeof response);
         client_send(client, response, strlen(response));
@@ -339,7 +341,10 @@ bool client_handle_frame(client_t *client, frame_t *frame)
             frame_uncompress(frame);
             if (frame->opcode == FRAME_OPCODE_TEXT &&
                 !is_valid_utf8(frame->payload.text, frame->payload_length))
+            {
+                printf("INVALID UTF8\n");
                 return true;
+            }
             client_send_frame(client, frame);
         }
         else
@@ -412,6 +417,8 @@ void client_send(client_t *client, void *buffer, size_t size)
 
 void client_send_frame(client_t *client, frame_t *frame)
 {
+    // printf("BEFORE SEND\n");
+    // frame_print(frame);
     frame_compress(frame);
     void *send_buffer = xmalloc(frame->payload_length + 16);
     size_t send_buffer_size;

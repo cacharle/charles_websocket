@@ -164,6 +164,8 @@ void handshake_write_response(handshake_t *handshake,
             next, "%d", handshake->permessage_deflate.server_max_window_bits);
         if (handshake->permessage_deflate.server_no_context_takeover)
             next = stpcpy(next, ";  server_no_context_takeover");
+        if (handshake->permessage_deflate.client_no_context_takeover)
+            next = stpcpy(next, ";  client_no_context_takeover");
         next = stpcpy(next, "\r\n");
     }
     strncat(response, "\r\n", response_size);
