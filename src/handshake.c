@@ -162,8 +162,9 @@ void handshake_write_response(handshake_t *handshake,
                       "server_max_window_bits=");
         next += sprintf(
             next, "%d", handshake->permessage_deflate.server_max_window_bits);
-        next += sprintf(
-            next, "; client_max_window_bits=%d", handshake->permessage_deflate.client_max_window_bits);
+        next += sprintf(next,
+                        "; client_max_window_bits=%d",
+                        handshake->permessage_deflate.client_max_window_bits);
         if (handshake->permessage_deflate.server_no_context_takeover)
             next = stpcpy(next, ";  server_no_context_takeover");
         if (handshake->permessage_deflate.client_no_context_takeover)
