@@ -81,11 +81,6 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
              parser->frame.permessage_deflate))
             return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
 
-        // if (!parser->frame.final &&
-        //     parser->frame.opcode != FRAME_OPCODE_CONTINUATION &&
-        //     parser->frame.opcode != FRAME_OPCODE_TEXT &&
-        //     parser->frame.opcode != FRAME_OPCODE_BINARY)
-        //     return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         if (layout->reserved != 0)
             return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         if (layout->permessage_deflate && !parser->permessage_deflate_allowed)
@@ -140,7 +135,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
             parser->frame.payload.binary = xmalloc(parser->frame.payload_length);
             break;
         case FRAME_OPCODE_TEXT:
-            parser->frame.payload.text = xmalloc(parser->frame.payload_length + 1);
+            parser->frame.payload.text = xmalloc(parser->frame.payload_length);
             break;
         case FRAME_OPCODE_CLOSE:
             parser->frame.payload.close.status_code = 0;
@@ -182,8 +177,6 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         memcpy(parser->frame.payload.text + parser->ingested_payload_length,
                data,
                size);
-        if (parser->ingested_payload_length + size == parser->frame.payload_length)
-            parser->frame.payload.text[parser->frame.payload_length] = '\0';
         break;
     case FRAME_OPCODE_CLOSE:
         // The code has to be 2 bytes or absent, it makes no sense to get a 1 byte
@@ -414,7 +407,6 @@ void frame_print(const frame_t *frame)
             printf("\"");
             for (size_t i = 0; i < frame->payload_length; i++)
             {
-                // printf(" | HERE %zu %d\n", i, frame->payload.text[i]);
                 if (frame->payload.text[i] == '\\')
                     printf("\\\\");
                 else if (frame->payload.text[i] == '"')
