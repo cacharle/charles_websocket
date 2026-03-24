@@ -38,7 +38,7 @@ typedef struct
 {
     int fd;
     size_t clients_count;
-    client_t clients[SERVER_MAX_CLIENTS];
+    client_t *clients;
     SSL_CTX *ssl_context;
     // read_func_t read_func;
     // write_func_t write_func;

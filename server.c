@@ -26,6 +26,7 @@ void server_init(server_t *server,
                  char *cert_path,
                  char *key_path)
 {
+    server->clients = xcalloc(SERVER_MAX_CLIENTS, sizeof(client_t));
     if (ssl_enabled)
     {
         SSL_library_init();
@@ -127,7 +128,7 @@ void server_start(server_t *server)
             client->defragmentation_state.active = false;
             client->defragmentation_state.payload = NULL;
             client->defragmentation_state.payload_length = 0;
-            frame_parser_init(&client->parser);
+            frame_parser_init(&client->parser, client->permessage_deflate.enabled);
             server->clients_count++;
             continue;
         }
@@ -267,7 +268,7 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
             // frame_print(&client->parser.frame);
             bool to_remove = client_handle_frame(client, &client->parser.frame);
             frame_destroy(&client->parser.frame);
-            frame_parser_init(&client->parser);
+            frame_parser_init(&client->parser, client->permessage_deflate.enabled);
             if (to_remove)
             {
                 free(client->defragmentation_state.payload);

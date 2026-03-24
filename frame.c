@@ -28,13 +28,14 @@ struct frame_header_layout
     uint8_t mask : 1;
 };
 
-void frame_parser_init(frame_parser_t *parser)
+void frame_parser_init(frame_parser_t *parser, bool permessage_deflate_allowed)
 {
     parser->header_parsed = false;
     parser->ingested_payload_length = 0;
     parser->header_buffer_position = 0;
     memset(&parser->frame, 0, sizeof(frame_t));
     parser->frame.opcode = -1;
+    parser->permessage_deflate_allowed = permessage_deflate_allowed;
 }
 
 static uint16_t valid_close_codes[] = {
@@ -86,6 +87,8 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         //     parser->frame.opcode != FRAME_OPCODE_BINARY)
         //     return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         if (layout->reserved != 0)
+            return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
+        if (layout->permessage_deflate && !parser->permessage_deflate_allowed)
             return FRAME_PARSER_INGEST_RESULT_ERROR_PROTOCOL;
         // Client to server MUST be masked
         if (!layout->mask)

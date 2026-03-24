@@ -41,6 +41,7 @@ typedef struct
     size_t ingested_payload_length;
     uint8_t header_buffer[16];
     size_t header_buffer_position;
+    bool permessage_deflate_allowed;
 } frame_parser_t;
 
 typedef enum
@@ -60,7 +61,7 @@ typedef enum
 #define FRAME_PARSER_INGEST_RESULT_IS_ERROR(e) \
     ((e) >= FRAME_PARSER_INGEST_RESULT_ERROR)
 
-void frame_parser_init(frame_parser_t *parser);
+void frame_parser_init(frame_parser_t *parser, bool permessage_deflate_allowed);
 frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
                                                  uint8_t *data,
                                                  size_t size,
