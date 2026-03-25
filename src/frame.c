@@ -148,7 +148,7 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
         }
     }
 
-    if (size > parser->frame.payload_length)
+    if (parser->ingested_payload_length + size > parser->frame.payload_length)
     {
         size_t size_to_consume =
             parser->frame.payload_length - parser->ingested_payload_length;
@@ -174,6 +174,8 @@ frame_parser_ingest_result_t frame_parser_ingest(frame_parser_t *parser,
                size);
         break;
     case FRAME_OPCODE_TEXT:
+        // printf("here ingested = %zu, payload_length = %zu, size = %zu\n",
+        // parser->ingested_payload_length, parser->frame.payload_length, size);
         memcpy(parser->frame.payload.text + parser->ingested_payload_length,
                data,
                size);

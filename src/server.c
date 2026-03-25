@@ -344,10 +344,7 @@ bool client_handle_frame(client_t *client, frame_t *frame)
             frame_uncompress(frame);
             if (frame->opcode == FRAME_OPCODE_TEXT &&
                 !is_valid_utf8(frame->payload.text, frame->payload_length))
-            {
-                printf("INVALID UTF8\n");
                 return true;
-            }
             client_send_frame(client, frame);
         }
         else
@@ -421,8 +418,6 @@ void client_send(client_t *client, void *buffer, size_t size)
 void client_send_frame(client_t *client, frame_t *frame)
 {
     frame_compress(frame);
-    // printf("BEFORE SEND\n");
-    // frame_print(frame);
     void *send_buffer = xmalloc(frame->payload_length + 16);
     size_t send_buffer_size;
     frame_dump(frame, send_buffer, &send_buffer_size);
