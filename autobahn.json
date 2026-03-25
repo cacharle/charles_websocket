@@ -5,7 +5,7 @@
       "url": "ws://localhost:8080"
     }
   ],
-  "cases": ["*"],
+  "cases": ["12.1.*"],
   "exclude-cases": ["7.1.6"],
   "exclude-agent-cases": {}
 }

@@ -208,6 +208,7 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
         handshake.permessage_deflate.client_no_context_takeover = true;
         handshake.permessage_deflate.server_max_window_bits = 15;
         handshake.permessage_deflate.client_max_window_bits = 15;
+        client->permessage_deflate = handshake.permessage_deflate;
         char response[1024];
         handshake_write_response(&handshake, response, sizeof response);
         client_send(client, response, strlen(response));

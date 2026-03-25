@@ -172,4 +172,5 @@ void handshake_write_response(handshake_t *handshake,
         next = stpcpy(next, "\r\n");
     }
     strncat(response, "\r\n", response_size);
+    printf("Sending: %s\n", response);
 }
