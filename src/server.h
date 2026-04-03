@@ -10,7 +10,7 @@
 #include "handshake.h"
 
 #define SERVER_MAX_CLIENTS 1024
-#define RECV_BUFFER_SIZE 4096
+#define RECV_BUFFER_SIZE 8192
 
 typedef struct
 {

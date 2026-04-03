@@ -13,6 +13,7 @@
 #include "xlibc.h"
 
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
+#define ZLIB_BUFFER_SIZE 16384
 
 struct frame_header_layout
 {
@@ -258,15 +259,15 @@ void frame_compress(frame_t *frame)
 
     stream.next_in = frame->payload.binary;
     stream.avail_in = frame->payload_length;
-    uint8_t buffer[4096];
+    uint8_t buffer[ZLIB_BUFFER_SIZE];
     void *compressed = NULL;
     size_t compressed_length = 0;
     do
     {
-        stream.avail_out = 4096;
+        stream.avail_out = ZLIB_BUFFER_SIZE;
         stream.next_out = buffer;
         deflate(&stream, Z_FULL_FLUSH);
-        size_t output_size = 4096 - stream.avail_out;
+        size_t output_size = ZLIB_BUFFER_SIZE - stream.avail_out;
         compressed = xrealloc(compressed, compressed_length + output_size);
         memcpy(compressed + compressed_length, buffer, output_size);
         compressed_length += output_size;
@@ -303,17 +304,17 @@ void frame_uncompress(frame_t *frame)
     stream.avail_in = input_size;
     stream.next_in = frame->payload.binary;
 
-    uint8_t buffer[4096];
+    uint8_t buffer[ZLIB_BUFFER_SIZE];
     void *decompressed = NULL;
     size_t decompressed_length = 0;
     do
     {
-        stream.avail_out = 4096;
+        stream.avail_out = ZLIB_BUFFER_SIZE;
         stream.next_out = buffer;
         result = inflate(&stream, Z_SYNC_FLUSH);
         if (result != Z_OK && result != Z_STREAM_END && result != Z_BUF_ERROR)
             xdie("Unable to inflate: %s", zError(result));
-        size_t output_size = 4096 - stream.avail_out;
+        size_t output_size = ZLIB_BUFFER_SIZE - stream.avail_out;
         decompressed = xrealloc(decompressed, decompressed_length + output_size);
         memcpy(decompressed + decompressed_length, buffer, output_size);
         decompressed_length += output_size;
