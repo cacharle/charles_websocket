@@ -385,6 +385,9 @@ bool client_handle_frame(client_t *client, frame_t *frame)
                 .payload.binary = client->defragmentation_state.payload,
             };
             frame_uncompress(&sent_frame);
+            client->defragmentation_state.payload = NULL;
+            client->defragmentation_state.payload_length = 0;
+            client->defragmentation_state.active = false;
             if (client->defragmentation_state.opcode == FRAME_OPCODE_TEXT &&
                 !is_valid_utf8(sent_frame.payload.text,
                                sent_frame.payload_length))
@@ -394,9 +397,6 @@ bool client_handle_frame(client_t *client, frame_t *frame)
             }
             client_send_frame(client, &sent_frame);
             free(sent_frame.payload.binary);
-            client->defragmentation_state.active = false;
-            client->defragmentation_state.payload = NULL;
-            client->defragmentation_state.payload_length = 0;
         }
         return false;
     }
