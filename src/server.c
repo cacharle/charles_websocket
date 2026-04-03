@@ -209,6 +209,7 @@ bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
         handshake.permessage_deflate.server_max_window_bits = 15;
         handshake.permessage_deflate.client_max_window_bits = 15;
         client->permessage_deflate = handshake.permessage_deflate;
+        frame_parser_init(&client->parser, client->permessage_deflate.enabled);
         char response[1024];
         handshake_write_response(&handshake, response, sizeof response);
         client_send(client, response, strlen(response));
@@ -351,6 +352,8 @@ bool client_handle_frame(client_t *client, frame_t *frame)
         else
         {
             client->defragmentation_state.active = true;
+            client->defragmentation_state.permessage_deflate =
+                frame->permessage_deflate;
             client->defragmentation_state.opcode = frame->opcode;
             client->defragmentation_state.payload_length = frame->payload_length;
             client->defragmentation_state.payload = xmalloc(frame->payload_length);
@@ -375,17 +378,22 @@ bool client_handle_frame(client_t *client, frame_t *frame)
         {
             frame_t sent_frame = {
                 .final = true,
+                .permessage_deflate =
+                    client->defragmentation_state.permessage_deflate,
                 .opcode = client->defragmentation_state.opcode,
                 .payload_length = client->defragmentation_state.payload_length,
                 .payload.binary = client->defragmentation_state.payload,
             };
             frame_uncompress(&sent_frame);
             if (client->defragmentation_state.opcode == FRAME_OPCODE_TEXT &&
-                !is_valid_utf8(client->defragmentation_state.payload,
-                               client->defragmentation_state.payload_length))
+                !is_valid_utf8(sent_frame.payload.text,
+                               sent_frame.payload_length))
+            {
+                free(sent_frame.payload.binary);
                 return true;
+            }
             client_send_frame(client, &sent_frame);
-            free(client->defragmentation_state.payload);
+            free(sent_frame.payload.binary);
             client->defragmentation_state.active = false;
             client->defragmentation_state.payload = NULL;
             client->defragmentation_state.payload_length = 0;

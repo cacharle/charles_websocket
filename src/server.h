@@ -15,6 +15,7 @@
 typedef struct
 {
     bool active;
+    bool permessage_deflate;
     frame_opcode_t opcode;
     size_t payload_length;
     void *payload;
