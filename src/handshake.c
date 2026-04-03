@@ -127,6 +127,8 @@ bool handshake_parse_request(handshake_t *handshake,
         }
     }
     if (handshake->host == NULL || handshake->websocket_key == NULL ||
+        header_upgrade == NULL || header_connection == NULL ||
+        header_websocket_version == NULL ||
         strcasecmp(header_upgrade, "WebSocket") != 0 ||
         strcasecmp(header_connection, "Upgrade") != 0 ||
         strcasecmp(header_websocket_version, "13") != 0)
@@ -151,7 +153,7 @@ void handshake_write_response(handshake_t *handshake,
     char *response_start = "HTTP/1.1 101 Switching Protocols\r\n"
                            "Upgrade: websocket\r\n"
                            "Connection: Upgrade\r\n"
-                           "Sec-WebSocket-Accept:";
+                           "Sec-WebSocket-Accept: ";
     char *next = stpcpy(response, response_start);
     next = stpcpy(next, accept_key);
     next = stpcpy(next, "\r\n");

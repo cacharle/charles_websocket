@@ -140,7 +140,7 @@ void server_start(server_t *server)
         {
             if (pollfds[i + 1].revents & POLLIN)
             {
-                uint8_t recv_buffer[RECV_BUFFER_SIZE];
+                uint8_t recv_buffer[RECV_BUFFER_SIZE + 1];
                 size_t recv_size;
                 client_t *client = &server->clients[i];
                 if (client->ssl == NULL)
@@ -148,6 +148,11 @@ void server_start(server_t *server)
                     int result = recv(client->fd, recv_buffer, RECV_BUFFER_SIZE, 0);
                     if (result < 0)
                         xdie("Invalid recv");
+                    if (result == 0)
+                    {
+                        to_remove[i] = true;
+                        continue;
+                    }
                     recv_size = result;
                 }
                 else
@@ -156,6 +161,12 @@ void server_start(server_t *server)
                         client->ssl, recv_buffer, RECV_BUFFER_SIZE, &recv_size);
                     if (result != 1)
                     {
+                        int ssl_error = SSL_get_error(client->ssl, result);
+                        if (ssl_error == SSL_ERROR_ZERO_RETURN)
+                        {
+                            to_remove[i] = true;
+                            continue;
+                        }
                         ERR_print_errors_fp(stderr);
                         xdie("Invalid SSL_read");
                     }
@@ -181,7 +192,7 @@ void server_start(server_t *server)
     }
 
     printf("Clean exit\n");
-    for (size_t i = 0; i <= server->clients_count; i++)
+    for (size_t i = 0; i < server->clients_count; i++)
         client_close(&server->clients[i], 1000);
     close(server->fd);
     if (server->ssl_context != NULL)
@@ -405,22 +416,27 @@ bool client_handle_frame(client_t *client, frame_t *frame)
 
 void client_send(client_t *client, void *buffer, size_t size)
 {
-    size_t send_bytes;
-    if (client->ssl == NULL)
+    while (size > 0)
     {
-        int result = send(client->fd, buffer, size, 0);
-        if (result < 0)
-            xdie("Counldn't send handshake");
-        send_bytes = result;
-    }
-    else
-    {
-        int result = SSL_write_ex(client->ssl, buffer, size, &send_bytes);
-        if (result != 1)
+        size_t send_bytes;
+        if (client->ssl == NULL)
         {
-            ERR_print_errors_fp(stderr);
-            xdie("Invalid SSL_write");
+            int result = send(client->fd, buffer, size, 0);
+            if (result < 0)
+                xdie("Couldn't send");
+            send_bytes = result;
         }
+        else
+        {
+            int result = SSL_write_ex(client->ssl, buffer, size, &send_bytes);
+            if (result != 1)
+            {
+                ERR_print_errors_fp(stderr);
+                xdie("Invalid SSL_write");
+            }
+        }
+        buffer += send_bytes;
+        size -= send_bytes;
     }
 }
 
@@ -431,4 +447,5 @@ void client_send_frame(client_t *client, frame_t *frame)
     size_t send_buffer_size;
     frame_dump(frame, send_buffer, &send_buffer_size);
     client_send(client, send_buffer, send_buffer_size);
+    free(send_buffer);
 }
