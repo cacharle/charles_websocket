@@ -3,7 +3,7 @@ all: examples/echo
 CCFLAGS = -Wall -Wextra -g -march=native -mtune=native -O3 -Iinclude -Isrc
 
 examples/echo: examples/echo.c libccws.a
-	gcc $(CCFLAGS) -L. -lccws $<
+	gcc $(CCFLAGS) -o $@ $< -L. -lccws $(shell pkg-config --libs openssl zlib)
 
 libccws.a: src/frame.o src/handshake.o src/utils.o src/server.o
 	ar rcs $@ $^
