@@ -1,10 +1,15 @@
-all: server
+all: examples/echo
 
-server: src/main.o src/frame.o src/handshake.o src/utils.o src/server.o
-	gcc -o server $(shell pkg-config --libs openssl zlib) $^
+CCFLAGS = -Wall -Wextra -g -march=native -mtune=native -O3 -Iinclude -Isrc
+
+examples/echo: examples/echo.c libccws.a
+	gcc $(CCFLAGS) -L. -lccws $<
+
+libccws.a: src/frame.o src/handshake.o src/utils.o src/server.o
+	ar rcs $@ $^
 
 %.o: %.c
-	gcc -Wall -Wextra -g -march=native -mtune=native -O3 -Isrc $(shell pkg-config --cflags openssl zlib) -o $@ -c $<
+	gcc $(CCFLAGS) $(shell pkg-config --cflags openssl zlib) -o $@ -c $<
 
 clean:
 	rm -vf src/*.o server

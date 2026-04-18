@@ -15,19 +15,22 @@
 #include <openssl/ssl.h>
 #include <zlib.h>
 
-#include "handshake.h"
-#include "server.h"
-#include "utils.h"
-#include "xlibc.h"
+#include "cacharle/ws/server.h"
 
-void server_init(server_t *server,
-                 uint16_t port,
-                 bool ssl_enabled,
-                 char *cert_path,
-                 char *key_path)
+#include "cacharle/ws/utils.h"
+#include "cacharle/ws/xlibc.h"
+
+bool client_ingest(client_t *client, uint8_t *buffer, size_t size);
+void client_close(client_t *client, int close_code);
+bool client_handle_frame(client_t *client, frame_t *frame);
+void client_send(client_t *client, void *buffer, size_t size);
+void client_send_frame(client_t *client, frame_t *frame);
+
+ws_server_t *ws_server_new(const ws_server_config_t *config)
 {
+    ws_server_t *server = xmalloc(sizeof(ws_server_t));
     server->clients = xcalloc(SERVER_MAX_CLIENTS, sizeof(client_t));
-    if (ssl_enabled)
+    if (config->cert_path != NULL)
     {
         SSL_library_init();
         SSL_load_error_strings();
@@ -39,8 +42,8 @@ void server_init(server_t *server,
             xdie("Unable to create SSL context");
         }
         SSL_CTX_use_certificate_file(
-            server->ssl_context, cert_path, SSL_FILETYPE_PEM);
-        SSL_CTX_use_PrivateKey_file(server->ssl_context, key_path, SSL_FILETYPE_PEM);
+            server->ssl_context, config->cert_path, SSL_FILETYPE_PEM);
+        SSL_CTX_use_PrivateKey_file(server->ssl_context, config->key_path, SSL_FILETYPE_PEM);
         if (!SSL_CTX_check_private_key(server->ssl_context))
             xdie("Private key does not match certificate\n");
     }
@@ -52,7 +55,7 @@ void server_init(server_t *server,
         xdie("Couldn't create socket");
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(port),
+        .sin_port = htons(config->port),
         .sin_addr = {.s_addr = INADDR_ANY},
     };
     // Allow the port to be reused after program end
@@ -66,15 +69,21 @@ void server_init(server_t *server,
         xdie("Couldn't listen on socket");
 }
 
-static bool sigint_triggered = false;
-void sigint_handler(int)
+void ws_server_destroy(ws_server_t *server)
 {
-    sigint_triggered = true;
+    for (size_t i = 0; i < server->clients_count; i++)
+        client_close(&server->clients[i], 1000);
+    close(server->fd);
+    if (server->ssl_context != NULL)
+    {
+        SSL_CTX_free(server->ssl_context);
+        EVP_cleanup();
+    }
+    free(server);
 }
 
-void server_start(server_t *server)
+int ws_server_recv(ws_server_t *server, ws_message_t *msg, int timeout)
 {
-    signal(SIGINT, sigint_handler);
     while (true)
     {
         struct pollfd pollfds[SERVER_MAX_CLIENTS + 1];
@@ -88,16 +97,11 @@ void server_start(server_t *server)
             pollfds[i + 1].events = POLLIN;
             pollfds[i + 1].revents = 0;
         }
-        int ret = poll(pollfds, server->clients_count + 1, 10);
-        if (ret == 0)  // Timeout
-            continue;
-        if (sigint_triggered)
-        {
-            printf("Interrupted by Ctrl-C\n");
-            break;
-        }
+        int ret = poll(pollfds, server->clients_count + 1, timeout);
         if (ret < 0)
             xdie("ppoll");
+        if (ret == 0)  // Timeout
+            return 0;
 
         // Accept a new client and add it to the client list
         if (pollfds[0].revents & POLLIN)
@@ -130,12 +134,15 @@ void server_start(server_t *server)
             client->defragmentation_state.payload_length = 0;
             frame_parser_init(&client->parser, client->permessage_deflate.enabled);
             server->clients_count++;
-            continue;
+
+            // Set message to open
+            msg->type = WS_MESSAGE_OPEN;
+            return 1;
         }
 
         // Check if there is any data to receive from active clients
         bool to_remove[SERVER_MAX_CLIENTS];
-        memset(to_remove, false, SERVER_MAX_CLIENTS);
+        memset(to_remove, 0, SERVER_MAX_CLIENTS);
         for (size_t i = 0; i < server->clients_count; i++)
         {
             if (pollfds[i + 1].revents & POLLIN)
@@ -192,14 +199,6 @@ void server_start(server_t *server)
     }
 
     printf("Clean exit\n");
-    for (size_t i = 0; i < server->clients_count; i++)
-        client_close(&server->clients[i], 1000);
-    close(server->fd);
-    if (server->ssl_context != NULL)
-    {
-        SSL_CTX_free(server->ssl_context);
-        EVP_cleanup();
-    }
 }
 
 bool client_ingest(client_t *client, uint8_t *buffer, size_t size)
