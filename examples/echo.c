@@ -3,11 +3,11 @@
 int main(void)
 {
     ws_server_t *srv = ws_server_new(
-        &(ws_server_config_t){.port = 8080, .permessage_deflate = true});
+        &(ws_server_config_t){.port = 8087, .permessage_deflate = true});
 
     ws_message_t msg;
     int result;
-    while ((result = ws_server_recv(srv, &msg, 1000) != -1))
+    while ((result = ws_server_recv(srv, &msg, 1000)) != -1)
     {
         if (result == 1)
             continue;

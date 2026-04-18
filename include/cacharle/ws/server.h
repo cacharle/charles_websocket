@@ -31,6 +31,8 @@ typedef struct
     defragmentation_state_t defragmentation_state;
     frame_parser_t parser;
     SSL *ssl;
+    uint8_t *recv_overflow;
+    size_t recv_overflow_len;
 } client_t;
 
 typedef struct
@@ -39,6 +41,7 @@ typedef struct
     size_t clients_count;
     client_t *clients;
     SSL_CTX *ssl_context;
+    uint8_t *last_msg_data;
 } ws_server_t;
 
 typedef enum {

@@ -1,6 +1,7 @@
 #ifndef CHARLES_WEBSOCKET_HANDSHAKE_H
 #define CHARLES_WEBSOCKET_HANDSHAKE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef struct
